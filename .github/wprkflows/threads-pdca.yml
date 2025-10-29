@@ -1,0 +1,128 @@
+name: Threads PDCA Automation
+
+on:
+  # 1日4回投稿チェック（日本時間 9時、12時、15時、18時）
+  schedule:
+    - cron: '0 0,3,6,9 * * *'
+    
+    # 3日ごとにPDCAレポート生成（日本時間 20時）
+    - cron: '0 11 */3 * *'
+  
+  # 手動実行
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード'
+        required: false
+        default: 'post'
+        type: choice
+        options:
+          - post
+          - pdca
+          - full-cycle
+
+jobs:
+  # 投稿ジョブ（1日4回）
+  post-threads:
+    runs-on: ubuntu-latest
+    # 0,3,6,9時に実行、またはpost/full-cycleモード
+    if: |
+      (github.event.schedule == '0 0,3,6,9 * * *') ||
+      (github.event_name == 'workflow_dispatch' && 
+       (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
+    
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: 依存関係をインストール
+        run: pip install requests
+      
+      - name: 投稿スクリプトを実行
+        run: python threads_pdca.py
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      
+      - name: ログファイルをコミット
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add posted_log.json analytics_data.csv || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "📝 Update logs [skip ci]"
+          git push || true
+  
+  # PDCAレポート生成ジョブ（3日ごと or 手動）
+  pdca-report:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event.schedule == '0 11 */3 * *') ||
+      (github.event_name == 'workflow_dispatch' && 
+       (github.event.inputs.mode == 'pdca' || github.event.inputs.mode == 'full-cycle'))
+    
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: 依存関係をインストール
+        run: pip install requests
+      
+      - name: PDCAレポートを生成
+        run: python threads_pdca.py full-cycle
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+      
+      - name: レポートファイルをコミット
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add pdca_report.md analytics_data.csv || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update PDCA report [skip ci]"
+          git push || true
+      
+      - name: GitHub Issueにレポートを投稿
+        if: always()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            
+            // レポートファイルを読み込み
+            let reportContent = '';
+            try {
+              reportContent = fs.readFileSync('pdca_report.md', 'utf8');
+            } catch (error) {
+              reportContent = '⚠️ レポートの生成に失敗しました。\n\nエラー: ' + error.message;
+            }
+            
+            // Issueを作成
+            const date = new Date().toLocaleDateString('ja-JP');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `📊 PDCA レポート - ${date}`,
+              body: reportContent,
+              labels: ['pdca-report', 'analytics']
+            });
+      
+      - name: 分析結果を通知（オプション）
+        if: always()
+        run: |
+          echo "✅ PDCAレポートが生成されました"
+          echo "📋 Issuesタブで確認してください"
+          cat pdca_report.md || echo "レポートファイルが見つかりません"
