@@ -1,1 +1,34 @@
+# 環境変数ファイル（機密情報）
 .env
+
+# 実行時に生成されるファイル
+posted_log.json
+analytics_data.csv
+pdca_report.md
+competitor_analytics.csv
+competitor_report.md
+
+# テストファイル
+posts_schedule_test.csv
+*_test.csv
+
+# Python関連
+venv/
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+
+# ログ
+*.log
+coverage/    
