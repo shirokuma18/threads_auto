@@ -45,10 +45,23 @@ jobs:
       - name: 依存関係をインストール
         run: pip install requests
 
-      - name: CSVからデータベースにインポート
+      - name: 前回のデータベースを復元
+        uses: actions/cache@v3
+        with:
+          path: threads.db
+          key: threads-db-${{ github.sha }}
+          restore-keys: |
+            threads-db-
+
+      - name: データベースを初期化（初回のみ）
         run: |
           if [ ! -f threads.db ]; then
-            python threads_sqlite.py import --csv posts_schedule.csv
+            echo "📦 データベースを初期化中..."
+            python3 migrate_to_sqlite.py init
+            python3 threads_sqlite.py import --csv posts_schedule.csv
+            echo "✅ データベース初期化完了"
+          else
+            echo "✅ 既存のデータベースを使用"
           fi
 
       - name: 投稿スクリプトを実行
@@ -57,13 +70,19 @@ jobs:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
       
-      - name: ログファイルをコミット
+      - name: データベースを保存
+        uses: actions/cache/save@v3
+        if: always()
+        with:
+          path: threads.db
+          key: threads-db-${{ github.sha }}
+
+      - name: データベースサイズをチェック
+        if: always()
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add threads.db || true
-          git diff --quiet && git diff --staged --quiet || git commit -m "📝 Update database [skip ci]"
-          git push || true
+          if [ -f threads.db ]; then
+            python3 check_db_size.py --quiet || true
+          fi
   
   # PDCAレポート生成ジョブ（3日ごと or 手動）
   pdca-report:
@@ -86,7 +105,15 @@ jobs:
       
       - name: 依存関係をインストール
         run: pip install requests
-      
+
+      - name: 前回のデータベースを復元
+        uses: actions/cache@v3
+        with:
+          path: threads.db
+          key: threads-db-${{ github.sha }}
+          restore-keys: |
+            threads-db-
+
       - name: PDCAレポートを生成
         run: python threads_sqlite.py pdca
         env:
@@ -97,7 +124,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add pdca_report.md threads.db || true
+          git add pdca_report.md || true
           git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update PDCA report [skip ci]"
           git push || true
       
