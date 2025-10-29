@@ -8,6 +8,9 @@ pdca_report.md
 competitor_analytics.csv
 competitor_report.md
 
+# アーカイブ
+archive/
+
 # テストファイル
 posts_schedule_test.csv
 *_test.csv

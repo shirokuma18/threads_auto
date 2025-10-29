@@ -1,386 +1,421 @@
-# Threads PDCA 自動化システム 🔄
+# 🚀 Threads自動投稿 + PDCA分析ツール
 
-**3日サイクルでPDCAを回し、投稿を継続的に改善するシステム**
+Threads APIを使った予約投稿とPDCA分析を自動化するツール（SQLite版）
 
-## 🎯 このシステムで実現できること
+## 📋 目次
 
+- [特徴](#特徴)
+- [セットアップ](#セットアップ)
+- [使い方](#使い方)
+- [投稿管理](#投稿管理)
+- [PDCA分析](#pdca分析)
+- [ディレクトリ構成](#ディレクトリ構成)
+- [CSVからの移行](#csvからの移行)
+
+---
+
+## ✨ 特徴
+
+### コア機能
+- **SQLiteベースの投稿管理** - 大量の投稿も高速処理
+- **予約投稿** - 指定時刻に自動投稿
+- **PDCA分析** - エンゲージメント分析とレポート自動生成
+- **投稿ステータス管理** - pending / posted / failed
+- **カテゴリ自動検出** - 恋愛、仕事、お金、メンタル、占い
+- **ドライランモード** - 実際に投稿せずにテスト可能
+
+### SQLite移行のメリット
+- ✅ 9,000件以上の投稿でも高速
+- ✅ 未投稿のみをクエリで取得
+- ✅ SQLで高度な分析が可能
+- ✅ データの整合性とトランザクション
+- ✅ CSVインポート/エクスポート可能
+
+---
+
+## 🛠️ セットアップ
+
+### 1. リポジトリのクローン
+
+```bash
+git clone <repository-url>
+cd threads_auto
 ```
-1. CSVに3日分の投稿を追加
-   ↓
-2. GitHub Actionsが自動投稿
-   ↓
-3. 3日後、自動で分析レポート生成
-   ↓
-4. レポートを見て次の3日分のCSVを追加
-   ↓
-5. 繰り返し（PDCA継続）
+
+### 2. 依存関係のインストール
+
+```bash
+pip install -r requirements.txt
 ```
 
-## 📊 自動生成されるPDCAレポート
+### 3. Threads API認証情報の取得
+
+1. [Meta for Developers](https://developers.facebook.com/)にアクセス
+2. アプリを作成
+3. Threads APIを有効化
+4. アクセストークンとユーザーIDを取得
+
+### 4. 環境変数の設定
+
+```bash
+cp .env.example .env
+```
+
+`.env`ファイルを編集:
+
+```bash
+THREADS_ACCESS_TOKEN=your_access_token_here
+THREADS_USER_ID=your_user_id_here
+```
+
+### 5. データベースの初期化
+
+**既存CSVがある場合（マイグレーション）:**
+
+```bash
+python3 migrate_to_sqlite.py full
+```
+
+**新規セットアップの場合:**
+
+```bash
+python3 migrate_to_sqlite.py init
+```
+
+---
+
+## 🚀 使い方
+
+### 投稿実行
+
+```bash
+# 投稿時刻になった投稿を自動実行
+python3 threads_sqlite.py post
+
+# ドライランモード（実際には投稿しない）
+python3 threads_sqlite.py post --dry-run
+```
+
+### 投稿一覧
+
+```bash
+# 全投稿を表示
+python3 threads_sqlite.py list
+
+# 未投稿のみ
+python3 threads_sqlite.py list --status pending
+
+# 今日の予定
+python3 threads_sqlite.py list --today
+
+# 明日の予定
+python3 threads_sqlite.py list --tomorrow
+
+# 表示件数を指定
+python3 threads_sqlite.py list --limit 10
+```
+
+---
+
+## 📝 投稿管理
+
+### 投稿を追加
+
+```bash
+python3 threads_sqlite.py add \
+  --datetime "2025-11-02 08:00" \
+  --text "私「最近...」友人「...」" \
+  --category "恋愛"
+```
+
+### CSVからインポート
+
+```bash
+python3 threads_sqlite.py import --csv new_posts.csv
+```
+
+**CSVフォーマット:**
+
+```csv
+id,datetime,text,status,category
+1,2025-11-01 08:00,"投稿テキスト",pending,恋愛
+2,2025-11-01 12:00,"投稿テキスト",pending,仕事
+```
+
+### CSVにエクスポート
+
+```bash
+# 全投稿をエクスポート
+python3 threads_sqlite.py export --output backup.csv
+
+# 未投稿のみエクスポート
+python3 threads_sqlite.py export --output pending.csv --status pending
+```
+
+---
+
+## 📊 PDCA分析
+
+### 基本的な使い方
+
+```bash
+# 過去3日間のPDCAレポートを生成
+python3 threads_sqlite.py pdca
+
+# カスタム期間
+python3 threads_sqlite.py pdca --days 7
+```
 
 ### レポート内容
 
-1. **📈 サマリー**
-   - 総表示回数、総エンゲージメント
-   - 平均エンゲージメント率
+生成されるレポート（`pdca_report.md`）には以下が含まれます:
 
-2. **🏆 トップパフォーマンス投稿**
-   - 反応が良かった投稿TOP3
-   - 具体的な数値
-
-3. **⏰ ベスト投稿時間帯**
-   - どの時間が最も反応が良いか
-   - データに基づく推奨時間
-
-4. **📝 コンテンツ分析**
-   - 最適な文字数
-   - 絵文字の効果
-   - ハッシュタグの有無
-
-5. **💡 次のアクションプラン**
-   - ✅ 続けること（Keep）
-   - 🔄 改善すること（Improve）
-   - 🆕 試すこと（Try）
-
-6. **📅 次の3日間の推奨スケジュール**
-   - データに基づく最適な投稿時刻
+- 📈 **サマリー** - 総表示回数、エンゲージメント率
+- 🏆 **トップパフォーマンス投稿** - 反応が良かった投稿
+- 🎯 **カテゴリ別パフォーマンス** - どのテーマが効果的か
+- ⏰ **ベスト投稿時間帯** - 最も反応が良い時間
+- 📝 **コンテンツ分析** - 文字数、絵文字の効果
+- ⚠️ **改善が必要な投稿** - 反応が悪かった投稿
+- 💡 **次のアクションプラン** - Keep/Improve/Try
 
 ---
 
-## 🚀 セットアップ（5分で完了）
-
-### 1. リポジトリ作成
-
-プライベートリポジトリを作成して、以下のファイルをアップロード：
+## 📁 ディレクトリ構成
 
 ```
-your-repo/
-├── .github/
-│   └── workflows/
-│       └── threads-pdca.yml
-├── threads_pdca.py
-├── posts_schedule.csv
-└── README.md
+threads_auto/
+├── README.md                    # このファイル
+├── requirements.txt             # Python依存関係
+├── .env                         # 環境変数（要作成）
+├── .gitignore                   # Git除外設定
+│
+├── threads_sqlite.py            # メインスクリプト
+├── migrate_to_sqlite.py         # マイグレーションツール
+├── threads.db                   # SQLiteデータベース
+│
+├── POST_CREATION_MANUAL.md      # 投稿作成マニュアル
+├── VIRAL_POST_STRATEGY.md       # バズる投稿戦略
+│
+├── posts_schedule.csv           # CSVバックアップ（オプション）
+├── pdca_report.md               # 生成されたレポート
+│
+└── archive/                     # 古いファイル
+    ├── threads_pdca.py          # 旧版スクリプト（CSV版）
+    └── ...
 ```
-
-### 2. Secrets設定
-
-Settings → Secrets and variables → Actions:
-
-- `THREADS_ACCESS_TOKEN`: あなたのアクセストークン
-- `THREADS_USER_ID`: あなたのユーザーID
-
-### 3. 最初の投稿CSVを作成
-
-`posts_schedule.csv`:
-```csv
-id,datetime,text
-1,2025-10-30 09:00,おはようございます！今日も頑張りましょう ☀️
-2,2025-10-30 12:00,お昼休憩 🍱 午後も頑張ります！
-3,2025-10-30 18:00,今日もお疲れさまでした 🌙
-4,2025-10-31 09:00,2日目の朝です！良い一日を ✨
-5,2025-10-31 15:00,午後のコーヒータイム ☕
-6,2025-10-31 19:00,また明日！
-7,2025-11-01 10:00,3日目！週末が近いですね 🎉
-8,2025-11-01 16:00,もうすぐ週末 🎊
-```
-
-### 4. Actions有効化
-
-- Actionsタブを開く
-- ワークフローを有効化
-- 完了！
 
 ---
 
-## 🔄 PDCA運用フロー（詳細）
+## 🗄️ データベース構造
 
-### Day 1-3: 投稿期間
+### postsテーブル
 
-```
-✅ 自動で投稿が実行される
-✅ 1日4回チェック（8時、12時、18時、21時）
-✅ データが自動蓄積
-```
+| カラム | 型 | 説明 |
+|--------|----|----|
+| id | INTEGER | 主キー |
+| csv_id | TEXT | CSV互換ID |
+| scheduled_at | DATETIME | 投稿予定時刻 |
+| text | TEXT | 投稿テキスト |
+| status | TEXT | pending / posted / failed |
+| category | TEXT | 恋愛、仕事、お金、メンタル、占い |
+| threads_post_id | TEXT | Threads投稿ID |
+| posted_at | DATETIME | 実際の投稿時刻 |
 
-**あなたがすること**: 何もしない（待つだけ）
+### analyticsテーブル
 
-### Day 3: 分析日
+| カラム | 型 | 説明 |
+|--------|----|----|
+| id | INTEGER | 主キー |
+| post_id | INTEGER | postsテーブルの外部キー |
+| views | INTEGER | 表示回数 |
+| likes | INTEGER | いいね数 |
+| replies | INTEGER | 返信数 |
+| engagement_rate | REAL | エンゲージメント率 |
 
-#### ステップ1: レポート確認
+---
 
-**方法A: GitHub Issueで確認（推奨）**
-1. リポジトリの **Issues** タブを開く
-2. 最新のIssue「📊 PDCA レポート」を開く
-3. レポート内容を確認
+## 📖 関連ドキュメント
 
-**方法B: ファイルで確認**
-1. リポジトリの `pdca_report.md` を開く
-2. 最新のレポートを確認
+- **[POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md)** - 投稿作成の完全ガイド
+  - ターゲットペルソナ
+  - 絶対NGルール
+  - バズる投稿の6つの法則
+  - 3つのテンプレート
+  - チェックリスト
 
-#### ステップ2: レポートを読んで分析
+- **[VIRAL_POST_STRATEGY.md](VIRAL_POST_STRATEGY.md)** - バズる投稿戦略
+  - バズる投稿の絶対ルール
+  - 投稿フォーマット
+  - 投稿時間戦略
+  - KPI目標
+  - PDCA改善
 
-レポートの**次のアクションプラン**セクションを確認：
+---
 
-```markdown
-## 💡 次のアクションプラン (Plan)
+## 🔄 CSVからの移行
 
-### ✅ 続けること (Keep)
-1. 12時台の投稿を増やす - 最も反応が良い時間帯です
-2. 短めの投稿が好調 - 80文字程度が効果的
-3. 絵文字の使用を継続 - エンゲージメント率が高い傾向
-
-### 🔄 改善すること (Improve)
-1. 低パフォーマンス投稿の分析 - なぜ反応が悪かったのか振り返る
-2. 投稿時間の最適化 - 23時台などは避ける
-
-### 🆕 試すこと (Try)
-1. 質問形式の投稿を試す
-2. ハッシュタグの効果を検証
-```
-
-#### ステップ3: 次の3日分のCSVを追加
-
-**方法A: 自動提案を使う（推奨）**
-
-Actions → **Threads PDCA Automation** → **Run workflow** → モード「full-cycle」で実行
-
-→ レポートに**推奨投稿時刻**が自動生成される
-
-**方法B: 手動で追加**
-
-`posts_schedule.csv` を編集して行を追加：
-
-```csv
-id,datetime,text
-...（既存の投稿）
-9,2025-11-02 12:00,レポート分析の結果を踏まえた新投稿 ✨
-10,2025-11-02 18:00,効果的な時間帯に投稿！
-11,2025-11-03 09:00,継続的な改善中 📈
-12,2025-11-03 12:00,データドリブンな投稿戦略 🎯
-13,2025-11-04 12:00,PDCAサイクル継続中 🔄
-14,2025-11-04 15:00,さらなる改善を目指して！
-```
-
-**ポイント:**
-- レポートの「ベスト時間帯」を参考に
-- トップパフォーマンス投稿の特徴を取り入れる
-- 新しいアプローチも1-2件試す
-
-#### ステップ4: コミット＆プッシュ
+既存のCSVファイルがある場合、以下のコマンドで簡単に移行できます:
 
 ```bash
-git add posts_schedule.csv
-git commit -m "Add next 3 days posts based on PDCA"
-git push
+# 1. データベース作成 + CSVインポート + ログ統合
+python3 migrate_to_sqlite.py full
+
+# 2. 統計確認
+python3 migrate_to_sqlite.py stats
+
+# 3. 新スクリプトでテスト
+python3 threads_sqlite.py post --dry-run
 ```
 
-### Day 4-6: 次のサイクル
+---
 
-同じサイクルを繰り返し！
+## ⚙️ GitHub Actions自動化
+
+### ワークフロー設定
+
+`.github/workflows/threads_auto.yml`を作成:
+
+```yaml
+name: Threads Auto Post
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # 毎時実行
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run posting
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+        run: python3 threads_sqlite.py post
+```
+
+### Secrets設定
+
+GitHubリポジトリの Settings > Secrets and variables > Actions で以下を設定:
+
+- `THREADS_ACCESS_TOKEN`
+- `THREADS_USER_ID`
 
 ---
 
-## 📋 実際の運用例
+## 🧪 テスト
 
-### 第1サイクル（Day 1-3）
+### ドライランモード
 
-**投稿内容:**
-- 様々な時間帯でテスト
-- 様々な文字数でテスト
-- 絵文字あり/なしでテスト
-
-**結果:**
-- 12時台が最も反応良い
-- 80-100文字が最適
-- 絵文字ありの方が+2%高い
-
-### 第2サイクル（Day 4-6）
-
-**改善点を反映:**
-- 12時台の投稿を2倍に
-- 文字数を80-100文字に統一
-- 全投稿に絵文字を追加
-
-**結果:**
-- エンゲージメント率が15%向上！
-
-### 第3サイクル（Day 7-9）
-
-**さらに改善:**
-- 質問形式を追加
-- ハッシュタグをテスト
-- 画像投稿も試す
-
-**結果:**
-- 質問形式が特に好調
-- ハッシュタグは効果なし
-- 画像は+5%の効果
-
----
-
-## 🛠️ 便利なコマンド
-
-### ローカルでレポート生成
+実際には投稿せず、動作確認のみ行います:
 
 ```bash
-# PDCAレポート生成
-python threads_pdca.py pdca
-
-# 次の投稿を提案
-python threads_pdca.py suggest
-
-# フルサイクル（両方実行）
-python threads_pdca.py full-cycle
+python3 threads_sqlite.py post --dry-run
 ```
 
-### GitHub Actionsで手動実行
+### テスト投稿の追加
 
-1. **Actions** タブを開く
-2. **Threads PDCA Automation** を選択
-3. **Run workflow** をクリック
-4. モードを選択:
-   - `post`: 投稿のみ実行
-   - `pdca`: レポート生成のみ
-   - `full-cycle`: 両方実行（推奨）
+過去の時刻で投稿を追加すると、すぐに実行されます:
 
----
+```bash
+python3 threads_sqlite.py add \
+  --datetime "2025-10-30 10:00" \
+  --text "テスト投稿" \
+  --category "テスト"
 
-## 📊 データの見方
-
-### analytics_data.csv
-
-```csv
-timestamp,post_id,text,posted_hour,posted_day,views,likes,replies,reposts,quotes,engagement,engagement_rate,char_count,has_emoji
-2025-10-30T10:00:00,123,おはよう...,9,Thursday,1500,85,12,8,3,108,7.20,85,True
-```
-
-**重要な列:**
-- `posted_hour`: 投稿時刻（何時か）
-- `engagement_rate`: エンゲージメント率（%）
-- `char_count`: 文字数
-- `has_emoji`: 絵文字の有無
-
-### Googleスプレッドシートでの分析
-
-1. `analytics_data.csv` をGoogleスプレッドシートにインポート
-2. ピボットテーブルで時間帯別の平均エンゲージメント率を計算
-3. グラフを作成して可視化
-
----
-
-## 💡 改善のヒント
-
-### エンゲージメント率を上げるには
-
-1. **ベスト時間帯を活用**
-   - データで判明した時間帯に集中投稿
-
-2. **トップ投稿の特徴を分析**
-   - 文字数、トーン、トピックの共通点
-
-3. **継続的なテスト**
-   - 毎回1-2件は新しいアプローチを試す
-
-4. **低パフォーマンス投稿を減らす**
-   - 反応が悪いパターンを避ける
-
-### よくある発見
-
-- **朝9時と昼12時が強い**（通勤・昼休み）
-- **深夜は避けるべき**（ターゲット層が寝ている）
-- **短文（50-100文字）が好まれる**（読みやすい）
-- **質問形式がエンゲージメント高い**（返信を促す）
-
----
-
-## ⚙️ カスタマイズ
-
-### 分析サイクルを変更
-
-`.github/workflows/threads-pdca.yml`:
-
-```yaml
-# 7日ごとに変更
-- cron: '0 11 */7 * *'
-
-# 毎週月曜日に変更
-- cron: '0 11 * * 1'
-```
-
-### 投稿チェック頻度を変更
-
-```yaml
-# 1日2回に変更
-- cron: '0 0,9 * * *'
-
-# 1時間ごとに変更
-- cron: '0 * * * *'
+python3 threads_sqlite.py post --dry-run
 ```
 
 ---
 
-## 📈 成功事例
+## 📈 投稿戦略
 
-### ケース1: 個人クリエイター
+### 推奨投稿頻度
 
-**開始時:**
-- エンゲージメント率: 3.5%
-- フォロワー増加: 10人/週
+- **1日25投稿** - 4つの時間帯に分散
+  - 8時台: 6投稿（通勤中）
+  - 12時台: 6投稿（昼休み）
+  - 18時台: 6投稿（帰宅後）
+  - 21時台: 7投稿（就寝前）
 
-**3サイクル後:**
-- エンゲージメント率: 7.2%（+106%）
-- フォロワー増加: 45人/週（+350%）
+### コンテンツMix
 
-**成功要因:**
-- データに基づく投稿時間の最適化
-- 反応の良いコンテンツ形式の特定
-- 継続的な改善
+| カテゴリ | 割合 | 投稿数/日 |
+|---------|------|-----------|
+| 恋愛・出会い | 30% | 8投稿 |
+| 仕事・転職 | 25% | 6投稿 |
+| お金・貯金 | 20% | 5投稿 |
+| メンタル | 15% | 4投稿 |
+| 占い | 10% | 2投稿 |
 
-### ケース2: ビジネスアカウント
+### 投稿フォーマット
 
-**開始時:**
-- 平均いいね数: 15
-- 返信率: 2%
+全投稿は以下のルールに従います:
 
-**5サイクル後:**
-- 平均いいね数: 58（+287%）
-- 返信率: 8%（+300%）
+- ✅ **500文字前後** - パッと見で情報量がありそう
+- ✅ **会話形式** - 漫画のように読める
+- ✅ **具体的な数字** - リアリティがある
+- ✅ **リスト形式** - 保存されやすい
+- ✅ **ビフォーアフター** - 気づきを与える
 
-**成功要因:**
-- 質問形式の投稿を増加
-- ベスト時間帯への集中投稿
-- PDCAサイクルの徹底
-
----
-
-## 🎯 まとめ
-
-このシステムの利点:
-
-✅ **完全自動化** - 投稿も分析も自動
-✅ **データドリブン** - 感覚ではなくデータで判断
-✅ **継続的改善** - PDCAサイクルで常に最適化
-✅ **時間節約** - 週に1回チェックするだけ
-✅ **無料** - GitHub Actions無料枠で十分
+詳細は [POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md) を参照。
 
 ---
 
-## 📚 参考資料
+## 🔧 トラブルシューティング
 
-- [Threads API ドキュメント](https://developers.facebook.com/docs/threads)
-- [GitHub Actions ドキュメント](https://docs.github.com/en/actions)
+### データベースが見つからない
+
+```bash
+python3 migrate_to_sqlite.py init
+```
+
+### 投稿が実行されない
+
+1. 投稿予定時刻を確認:
+   ```bash
+   python3 threads_sqlite.py list --status pending --limit 5
+   ```
+
+2. 現在時刻より過去の時刻に設定されているか確認
+
+3. ドライランで動作確認:
+   ```bash
+   python3 threads_sqlite.py post --dry-run
+   ```
+
+### API認証エラー
+
+1. 環境変数が正しく設定されているか確認:
+   ```bash
+   echo $THREADS_ACCESS_TOKEN
+   echo $THREADS_USER_ID
+   ```
+
+2. アクセストークンの有効期限を確認
 
 ---
 
-## ⚖️ 免責事項
+## 📝 ライセンス
 
-- 自己責任で使用してください
-- Threads利用規約を遵守してください
-- レート制限を守ってください
+MIT License
 
 ---
 
-**Happy PDCA! 🔄📈**
+## 🤝 コントリビューション
 
-定期的にレポートを確認し、継続的に改善を重ねましょう！
+Issue や Pull Request は大歓迎です！
+
+---
+
+**Happy Posting! 🚀**

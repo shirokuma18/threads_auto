@@ -44,7 +44,13 @@ jobs:
       
       - name: 依存関係をインストール
         run: pip install requests
-      
+
+      - name: CSVからデータベースにインポート
+        run: |
+          if [ ! -f threads.db ]; then
+            python threads_sqlite.py import --csv posts_schedule.csv
+          fi
+
       - name: 投稿スクリプトを実行
         run: python threads_sqlite.py post
         env:
