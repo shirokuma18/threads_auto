@@ -46,7 +46,7 @@ jobs:
         run: pip install requests
       
       - name: 投稿スクリプトを実行
-        run: python threads_pdca.py
+        run: python threads_sqlite.py post
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
@@ -55,8 +55,8 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add posted_log.json analytics_data.csv || true
-          git diff --quiet && git diff --staged --quiet || git commit -m "📝 Update logs [skip ci]"
+          git add threads.db || true
+          git diff --quiet && git diff --staged --quiet || git commit -m "📝 Update database [skip ci]"
           git push || true
   
   # PDCAレポート生成ジョブ（3日ごと or 手動）
@@ -82,7 +82,7 @@ jobs:
         run: pip install requests
       
       - name: PDCAレポートを生成
-        run: python threads_pdca.py full-cycle
+        run: python threads_sqlite.py pdca
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
@@ -91,7 +91,7 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add pdca_report.md analytics_data.csv || true
+          git add pdca_report.md threads.db || true
           git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update PDCA report [skip ci]"
           git push || true
       
