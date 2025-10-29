@@ -1,9 +1,9 @@
 name: Threads PDCA Automation
 
 on:
-  # 1日4回投稿チェック（日本時間 9時、12時、15時、18時）
+  # 1日4回投稿チェック（日本時間 8時、12時、18時、21時）
   schedule:
-    - cron: '0 0,3,6,9 * * *'
+    - cron: '0 23,3,9,12 * * *'
     
     # 3日ごとにPDCAレポート生成（日本時間 20時）
     - cron: '0 11 */3 * *'
@@ -25,9 +25,9 @@ jobs:
   # 投稿ジョブ（1日4回）
   post-threads:
     runs-on: ubuntu-latest
-    # 0,3,6,9時に実行、またはpost/full-cycleモード
+    # 23,3,9,12時（UTC）に実行、またはpost/full-cycleモード
     if: |
-      (github.event.schedule == '0 0,3,6,9 * * *') ||
+      (github.event.schedule == '0 23,3,9,12 * * *') ||
       (github.event_name == 'workflow_dispatch' && 
        (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
     
