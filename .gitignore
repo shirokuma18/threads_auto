@@ -12,6 +12,10 @@ pdca_report.md
 competitor_analytics.csv
 competitor_report.md
 
+# ローカル分析結果（機密）
+analysis_results.json
+analysis_report.md
+
 # アーカイブ
 archive/
 

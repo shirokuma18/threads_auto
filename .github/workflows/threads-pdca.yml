@@ -92,11 +92,11 @@ jobs:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
 
-      - name: 投稿履歴を更新
+      - name: 投稿履歴を更新・投稿済みをCSVから削除
         if: always()
         run: |
-          # 今日のposted投稿を posted_history.csv に追加
           if [ -f threads.db ]; then
+            # 1. 今日のposted投稿を posted_history.csv に追加
             sqlite3 threads.db -header -csv \
               "SELECT csv_id, posted_at FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
               | tail -n +2 >> posted_history.csv
@@ -109,15 +109,47 @@ jobs:
             (echo "csv_id,posted_at" && tail -n +2 posted_history.csv | sort -u) > posted_history.csv.tmp
             mv posted_history.csv.tmp posted_history.csv
 
-            # 変更があればコミット
-            if ! git diff --quiet posted_history.csv; then
-              POSTED_COUNT=$(tail -n +2 posted_history.csv | wc -l | tr -d ' ')
-              echo "📊 投稿履歴を更新: ${POSTED_COUNT} 件"
+            # 2. 投稿済みの csv_id を取得
+            POSTED_IDS=$(sqlite3 threads.db -csv \
+              "SELECT csv_id FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
+              | tr '\n' ',' | sed 's/,$//')
 
-              git config --local user.email "github-actions[bot]@users.noreply.github.com"
-              git config --local user.name "github-actions[bot]"
-              git add posted_history.csv
-              git commit -m "Update posting history: ${POSTED_COUNT} total posts [skip ci]"
+            if [ -n "$POSTED_IDS" ]; then
+              echo "📝 投稿済みIDをCSVから削除: $POSTED_IDS"
+
+              # 3. posts_schedule.csv から投稿済みの行を削除
+              python3 - <<EOF
+import csv
+
+posted_ids = set('$POSTED_IDS'.split(','))
+rows = []
+
+with open('posts_schedule.csv', 'r', encoding='utf-8') as f:
+    reader = csv.DictReader(f)
+    fieldnames = reader.fieldnames
+    for row in reader:
+        if row['id'] not in posted_ids:
+            rows.append(row)
+
+with open('posts_schedule.csv', 'w', encoding='utf-8', newline='') as f:
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f"✅ {len(posted_ids)} 件を削除、{len(rows)} 件が残っています")
+EOF
+            fi
+
+            # 4. 変更があればコミット
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+
+            if ! git diff --quiet posted_history.csv posts_schedule.csv; then
+              POSTED_COUNT=$(tail -n +2 posted_history.csv | wc -l | tr -d ' ')
+              REMAINING_COUNT=$(tail -n +2 posts_schedule.csv | wc -l | tr -d ' ')
+
+              git add posted_history.csv posts_schedule.csv
+              git commit -m "Update: Posted ${POSTED_COUNT} total, ${REMAINING_COUNT} remaining [skip ci]"
               git push
             fi
           fi
