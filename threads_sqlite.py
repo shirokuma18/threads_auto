@@ -174,24 +174,30 @@ def get_post_insights(threads_post_id):
 # ============================================
 
 def get_pending_posts():
-    """未投稿で投稿時刻を過ぎたものを取得（1件のみ）"""
+    """未投稿で投稿可能なものを取得（1件のみ）"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     # 日本時間（JST = UTC+9）で現在時刻を取得
     from datetime import timezone, timedelta
     jst = timezone(timedelta(hours=9))
-    current_time = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(jst)
+    current_time = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 古すぎる投稿（2時間以上前）は除外
+    cutoff_time = (now - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S')
 
     # レート制限対策：1回の実行で1件のみ取得
+    # scheduled_at が過去のもの（最大2時間前まで）を古い順に取得
     cursor.execute("""
         SELECT id, csv_id, scheduled_at, text, category
         FROM posts
         WHERE status = 'pending'
+          AND scheduled_at >= ?
           AND scheduled_at <= ?
         ORDER BY scheduled_at
         LIMIT 1
-    """, (current_time,))
+    """, (cutoff_time, current_time,))
 
     posts = cursor.fetchall()
     conn.close()
