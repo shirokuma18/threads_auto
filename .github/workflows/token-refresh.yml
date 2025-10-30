@@ -117,40 +117,43 @@ jobs:
             }
 
             // 新しいIssueを作成
+            const issueBody = [
+              '## ⚠️ アクセストークンが期限切れです',
+              '',
+              `**検出日時**: ${date}`,
+              '',
+              '### 📝 対処方法',
+              '',
+              '1. **新しい短期トークンを取得**',
+              '   - https://developers.facebook.com/tools/explorer/ にアクセス',
+              '   - Threads アプリを選択',
+              '   - 必要な権限を選択して「Generate Access Token」',
+              '',
+              '2. **長期トークンに変換**',
+              '   ```bash',
+              '   python3 setup_long_lived_token.py',
+              '   ```',
+              '',
+              '3. **GitHub Secrets を更新**',
+              `   - [Settings > Secrets and variables > Actions](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/secrets/actions)`,
+              '   - `THREADS_ACCESS_TOKEN` を新しいトークンで更新',
+              '',
+              '4. **このIssueをクローズ**',
+              '',
+              '### 📚 詳細なガイド',
+              '',
+              '詳しい手順は [TOKEN_SETUP.md](./TOKEN_SETUP.md) を参照してください。',
+              '',
+              '---',
+              '',
+              '**自動生成**: Token Auto-Refresh Workflow'
+            ].join('\n');
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `🔑 Threads API トークンが期限切れです - ${date}`,
-              body: `## ⚠️ アクセストークンが期限切れです
-
-**検出日時**: ${date}
-
-### 📝 対処方法
-
-1. **新しい短期トークンを取得**
-   - https://developers.facebook.com/tools/explorer/ にアクセス
-   - Threads アプリを選択
-   - 必要な権限を選択して「Generate Access Token」
-
-2. **長期トークンに変換**
-   \`\`\`bash
-   python3 setup_long_lived_token.py
-   \`\`\`
-
-3. **GitHub Secrets を更新**
-   - [Settings > Secrets and variables > Actions](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/secrets/actions)
-   - \`THREADS_ACCESS_TOKEN\` を新しいトークンで更新
-
-4. **このIssueをクローズ**
-
-### 📚 詳細なガイド
-
-詳しい手順は [TOKEN_SETUP.md](./TOKEN_SETUP.md) を参照してください。
-
----
-
-**自動生成**: Token Auto-Refresh Workflow
-`,
+              body: issueBody,
               labels: ['token-expired', 'urgent', 'automation']
             });
 
