@@ -21,6 +21,9 @@ on:
           - pdca
           - full-cycle
 
+permissions:
+  contents: write
+
 jobs:
   # 投稿ジョブ（1日4回）
   post-threads:
