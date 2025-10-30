@@ -37,8 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     # 投稿時刻に実行、またはpost/full-cycleモード
     if: |
-      (github.event.schedule == '5,15,25,35,45,55 23,3,9,12 * * *') ||
-      (github.event.schedule == '5 6,13 * * *') ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
        (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
     
@@ -156,8 +155,8 @@ jobs:
   pdca-report:
     runs-on: ubuntu-latest
     if: |
-      (github.event.schedule == '0 11 */3 * *') ||
-      (github.event_name == 'workflow_dispatch' && 
+      (github.event_name == 'schedule' && github.event.schedule == '0 11 */3 * *') ||
+      (github.event_name == 'workflow_dispatch' &&
        (github.event.inputs.mode == 'pdca' || github.event.inputs.mode == 'full-cycle'))
     
     steps:
