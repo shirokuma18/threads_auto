@@ -1,0 +1,178 @@
+name: Token Auto-Refresh
+
+on:
+  # 毎週日曜日 20:00 JST (11:00 UTC) に実行
+  schedule:
+    - cron: '0 11 * * 0'
+
+  # 手動実行も可能
+  workflow_dispatch:
+
+jobs:
+  check-and-refresh-token:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests
+
+      - name: トークンの有効性をチェック
+        id: check_token
+        run: |
+          python3 - <<'PYTHON_SCRIPT'
+          import requests
+          import os
+          import sys
+          from datetime import datetime
+
+          access_token = os.getenv('THREADS_ACCESS_TOKEN')
+
+          if not access_token:
+              print("❌ THREADS_ACCESS_TOKEN が設定されていません")
+              sys.exit(1)
+
+          # トークンの有効性をチェック
+          url = "https://graph.threads.net/v1.0/me"
+          params = {
+              "fields": "id,username",
+              "access_token": access_token
+          }
+
+          try:
+              response = requests.get(url, params=params)
+              response.raise_for_status()
+              data = response.json()
+
+              print(f"✅ トークンは有効です")
+              print(f"User ID: {data.get('id')}")
+              print(f"Username: @{data.get('username')}")
+
+              # GitHub Actions の出力に保存
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"token_valid=true\n")
+                  f.write(f"user_id={data.get('id')}\n")
+                  f.write(f"username={data.get('username')}\n")
+
+          except requests.exceptions.RequestException as e:
+              print(f"❌ トークンが無効です: {e}")
+
+              if hasattr(e, 'response') and e.response is not None:
+                  try:
+                      error_detail = e.response.json()
+                      error_msg = error_detail.get('error', {}).get('message', '')
+                      print(f"エラー詳細: {error_msg}")
+
+                      # トークン期限切れの場合
+                      if 'expired' in error_msg.lower():
+                          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                              f.write(f"token_valid=false\n")
+                              f.write(f"token_expired=true\n")
+                          sys.exit(0)  # ワークフローは続行（通知のため）
+                  except:
+                      pass
+
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"token_valid=false\n")
+                  f.write(f"token_expired=false\n")
+              sys.exit(0)
+          PYTHON_SCRIPT
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+
+      - name: トークンリフレッシュを試行（実験的）
+        id: refresh_token
+        if: steps.check_token.outputs.token_valid == 'true'
+        continue-on-error: true
+        run: |
+          python3 refresh_token.py || echo "⚠️  自動リフレッシュは現在サポートされていません"
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+
+      - name: トークン期限切れ通知（Issue作成）
+        if: steps.check_token.outputs.token_expired == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const date = new Date().toLocaleDateString('ja-JP');
+
+            // 既存の期限切れIssueをチェック
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'token-expired',
+              state: 'open'
+            });
+
+            if (issues.data.length > 0) {
+              console.log('既に期限切れ通知Issueが存在します');
+              return;
+            }
+
+            // 新しいIssueを作成
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔑 Threads API トークンが期限切れです - ${date}`,
+              body: `## ⚠️ アクセストークンが期限切れです
+
+**検出日時**: ${date}
+
+### 📝 対処方法
+
+1. **新しい短期トークンを取得**
+   - https://developers.facebook.com/tools/explorer/ にアクセス
+   - Threads アプリを選択
+   - 必要な権限を選択して「Generate Access Token」
+
+2. **長期トークンに変換**
+   \`\`\`bash
+   python3 setup_long_lived_token.py
+   \`\`\`
+
+3. **GitHub Secrets を更新**
+   - [Settings > Secrets and variables > Actions](https://github.com/${context.repo.owner}/${context.repo.repo}/settings/secrets/actions)
+   - \`THREADS_ACCESS_TOKEN\` を新しいトークンで更新
+
+4. **このIssueをクローズ**
+
+### 📚 詳細なガイド
+
+詳しい手順は [TOKEN_SETUP.md](./TOKEN_SETUP.md) を参照してください。
+
+---
+
+**自動生成**: Token Auto-Refresh Workflow
+`,
+              labels: ['token-expired', 'urgent', 'automation']
+            });
+
+      - name: 有効性チェック結果をサマリーに出力
+        if: always()
+        run: |
+          echo "## 🔑 Threads API トークンチェック結果" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.check_token.outputs.token_valid }}" == "true" ]; then
+            echo "✅ **トークンは有効です**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- User ID: ${{ steps.check_token.outputs.user_id }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Username: @${{ steps.check_token.outputs.username }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📅 次回チェック: 1週間後" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **トークンが無効または期限切れです**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📝 対処方法:" >> $GITHUB_STEP_SUMMARY
+            echo "1. \`python3 setup_long_lived_token.py\` を実行" >> $GITHUB_STEP_SUMMARY
+            echo "2. GitHub Secrets を更新" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "詳細は [TOKEN_SETUP.md](./TOKEN_SETUP.md) を参照" >> $GITHUB_STEP_SUMMARY
+          fi
