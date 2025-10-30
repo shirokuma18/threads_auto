@@ -39,6 +39,7 @@ def create_database():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 
             category TEXT,
+            topic TEXT,
             char_count INTEGER,
             has_emoji BOOLEAN DEFAULT 0,
 
@@ -132,6 +133,8 @@ def import_csv(csv_file=CSV_FILE):
             csv_id = row.get('id', '').strip()
             datetime_str = row.get('datetime', '').strip()
             text = row.get('text', '').strip()
+            category = row.get('category', '').strip() or None
+            topic = row.get('topic', '').strip() or None
             thread_text = row.get('thread_text', '').strip() or None
 
             if not csv_id or not datetime_str or not text:
@@ -148,15 +151,16 @@ def import_csv(csv_file=CSV_FILE):
                 has_emoji = any(ord(c) > 127 for c in text)
 
                 # カテゴリの推定（キーワードベース）
-                category = detect_category(text)
+                if not category:
+                    category = detect_category(text)
 
                 # 挿入
                 cursor.execute("""
                     INSERT INTO posts (
                         csv_id, scheduled_at, text, thread_text, status,
-                        char_count, has_emoji, category
-                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
-                """, (csv_id, scheduled_at, text, thread_text, char_count, has_emoji, category))
+                        category, topic, char_count, has_emoji
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                """, (csv_id, scheduled_at, text, thread_text, category, topic, char_count, has_emoji))
 
                 imported += 1
 

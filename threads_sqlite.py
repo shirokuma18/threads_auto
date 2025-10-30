@@ -48,6 +48,32 @@ def get_db_connection():
     return conn
 
 
+def migrate_db():
+    """データベースのマイグレーション処理"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 既存のカラムを取得
+    cursor.execute("PRAGMA table_info(posts)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    # thread_text カラムが存在しない場合は追加
+    if 'thread_text' not in columns:
+        print("  → thread_text カラムを追加中...")
+        cursor.execute("ALTER TABLE posts ADD COLUMN thread_text TEXT")
+        conn.commit()
+        print("  ✓ thread_text カラムを追加しました")
+
+    # topic カラムが存在しない場合は追加
+    if 'topic' not in columns:
+        print("  → topic カラムを追加中...")
+        cursor.execute("ALTER TABLE posts ADD COLUMN topic TEXT")
+        conn.commit()
+        print("  ✓ topic カラムを追加しました")
+
+    conn.close()
+
+
 def create_threads_post(text, reply_to_id=None):
     """Threads APIで投稿を作成（スレッド対応）"""
     global DRY_RUN
@@ -216,7 +242,7 @@ def get_pending_posts():
     # レート制限対策：1回の実行で1件のみ取得
     # scheduled_at が現在時刻以前の未投稿分を古い順に取得
     cursor.execute("""
-        SELECT id, csv_id, scheduled_at, text, category, thread_text
+        SELECT id, csv_id, scheduled_at, text, category, topic, thread_text
         FROM posts
         WHERE status = 'pending'
           AND scheduled_at <= ?
@@ -436,6 +462,7 @@ def import_from_csv(csv_file):
             datetime_str = row.get('datetime', '').strip()
             text = row.get('text', '').strip()
             category = row.get('category', '').strip() or None
+            topic = row.get('topic', '').strip() or None
             thread_text = row.get('thread_text', '').strip() or None
 
             if not csv_id or not datetime_str or not text:
@@ -453,9 +480,9 @@ def import_from_csv(csv_file):
                 cursor.execute("""
                     INSERT INTO posts (
                         csv_id, scheduled_at, text, thread_text, status,
-                        category, char_count, has_emoji
-                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
-                """, (csv_id, scheduled_at, text, thread_text, category, char_count, has_emoji))
+                        category, topic, char_count, has_emoji
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+                """, (csv_id, scheduled_at, text, thread_text, category, topic, char_count, has_emoji))
 
                 imported += 1
 
@@ -961,6 +988,9 @@ def main():
         if not validate_config():
             print("\n⚠️  設定に問題があります。上記のエラーを確認してください。")
             sys.exit(1)
+
+        # データベースマイグレーション
+        migrate_db()
 
         check_and_post()
 
