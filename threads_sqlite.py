@@ -478,6 +478,24 @@ def export_to_csv(output_file, status=None):
 # 投稿処理
 # ============================================
 
+def load_posted_history():
+    """posted_history.csv から投稿済みの csv_id を取得"""
+    posted_ids = set()
+    history_file = 'posted_history.csv'
+
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    posted_ids.add(str(row['csv_id']))
+            print(f"📋 投稿履歴: {len(posted_ids)}件の投稿を確認")
+        except Exception as e:
+            print(f"⚠️  投稿履歴の読み込みエラー: {e}")
+
+    return posted_ids
+
+
 def check_and_post():
     """スケジュールをチェックして投稿"""
     global DRY_RUN
@@ -487,6 +505,9 @@ def check_and_post():
     jst = timezone(timedelta(hours=9))
     current_time_jst = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n📅 現在時刻（JST）: {current_time_jst}")
+
+    # 投稿済み履歴を読み込み
+    posted_ids = load_posted_history()
 
     posts = get_pending_posts()
 
@@ -502,13 +523,19 @@ def check_and_post():
 
     for i, post in enumerate(posts):
         post_id = post['id']
-        csv_id = post['csv_id']
+        csv_id = str(post['csv_id'])
         text = post['text']
         scheduled_at = post['scheduled_at']
         category = post.get('category', '未分類')
 
         print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
         print(f"  テキスト: {text[:80]}{'...' if len(text) > 80 else ''}")
+
+        # 重複チェック
+        if csv_id in posted_ids:
+            print(f"  ⚠️  すでに投稿済み（posted_history.csvに記録あり）")
+            mark_as_posted(post_id, f"duplicate_{csv_id}")
+            continue
 
         if DRY_RUN:
             print(f"  → [ドライラン] 実際には投稿されません")

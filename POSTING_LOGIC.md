@@ -110,10 +110,11 @@ ORDER BY scheduled_at
 
 ```
 初期状態 (リポジトリ):
-├─ threads.db
-│  ├─ 投稿1: status='pending', scheduled_at='2025-10-30 00:35'
-│  ├─ 投稿2: status='pending', scheduled_at='2025-10-30 07:15'
+├─ posts_schedule.csv (投稿マスターデータ)
+│  ├─ id,datetime,text,category
+│  ├─ 30,2025-10-30 00:35,"...",メンタル
 │  └─ ...
+└─ threads.db (リポジトリには含まれない - .gitignore)
 
 ワークフロー実行 (GitHub Actions):
 1. キャッシュからDBを復元
@@ -122,38 +123,52 @@ ORDER BY scheduled_at
 2. DBの検証
    ├─ 今日のpending投稿数をチェック
    ├─ 今日のposted投稿数をチェック
-   └─ 必要に応じてリポジトリのDBでリカバリー
+   └─ 必要に応じてCSVから再インポート
 
 3. 投稿実行
    ├─ pending投稿を取得
    ├─ Threads API で投稿
    └─ status='pending' → status='posted' に更新
 
-4. DBをリポジトリにコミット
-   ├─ git add threads.db
-   ├─ git commit -m "Update database: X posts published"
-   └─ git push
-
-5. DBをキャッシュに保存
-   └─ 次回の実行で使用
+4. DBをキャッシュに保存
+   └─ 次回の実行で使用（リポジトリにはコミットしない）
 ```
+
+**重要な設計変更:**
+- ✅ **threads.db はリポジトリにコミットされません**
+- ✅ **キャッシュとCSVで管理** - 開発体験が向上
+- ✅ **git pull でDBが上書きされない** - ローカル開発が安全
 
 ---
 
-### 2. キャッシュとリポジトリの使い分け
+### 2. キャッシュとCSVの使い分け
 
 **GitHub Actions のキャッシュ:**
-- **目的:** ワークフロー間でデータを高速に共有
+- **目的:** ワークフロー間でDBの状態を保持
 - **キー:** `threads-db-v2-{commit-sha}`
 - **有効期限:** 7日間（アクセスがない場合）
-- **メリット:** 高速復元（数秒）
+- **内容:** threads.db（posted状態を含む）
+- **メリット:** 高速、投稿の重複を防ぐ
 - **デメリット:** 永続的ではない
 
-**リポジトリの threads.db:**
-- **目的:** 永続的なデータ保存
-- **更新タイミング:** 投稿実行後に自動コミット
-- **メリット:** 完全な履歴、永続的
-- **デメリット:** バイナリファイル（差分が見づらい）
+**リポジトリの posts_schedule.csv:**
+- **目的:** 投稿マスターデータの管理
+- **形式:** CSV（テキストベース）
+- **内容:** id, datetime, text, category
+- **メリット:**
+  - ✅ 差分が見える
+  - ✅ マージ可能
+  - ✅ 手動編集が容易
+  - ✅ git pull で問題が起きない
+- **用途:** キャッシュ消失時の復元元
+
+**threads.db (ローカルのみ):**
+- **場所:** ローカル環境、GitHub Actions キャッシュ
+- **リポジトリ:** 含まれない（.gitignore）
+- **メリット:**
+  - ✅ 開発環境が汚染されない
+  - ✅ git pull でDBが上書きされない
+  - ✅ リポジトリサイズが増えない
 
 ---
 
@@ -172,8 +187,10 @@ echo "📊 キャッシュDB: pending (今日 $TODAY_PENDING 件) / posted (今�
 # 2. リカバリーの判断
 if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
   # 今日のpendingもpostedもない → キャッシュが壊れている
-  echo "⚠️  今日の投稿がありません。リポジトリのthreads.dbを使用します。"
-  git checkout threads.db
+  echo "⚠️  今日の投稿がありません。CSVから再インポートします。"
+  rm -f threads.db
+  python3 migrate_to_sqlite.py init
+  python3 threads_sqlite.py import --csv posts_schedule.csv
 elif [ "$TODAY_POSTED" -gt 0 ]; then
   # すでに投稿済み → キャッシュを信頼
   echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。キャッシュDBを使用します。"
@@ -184,46 +201,10 @@ fi
 
 | 今日のpending | 今日のposted | アクション |
 |--------------|-------------|-----------|
-| 0件 | 0件 | ⚠️ リポジトリDBでリカバリー |
+| 0件 | 0件 | ⚠️ CSVから再インポート |
 | 0件 | 5件 | ✅ キャッシュDB使用（すでに投稿済み） |
 | 10件 | 0件 | ✅ キャッシュDB使用（まだ投稿していない） |
 | 10件 | 5件 | ✅ キャッシュDB使用（一部投稿済み） |
-
----
-
-### 4. リポジトリへの自動コミット
-
-**投稿後の処理:**
-
-```bash
-# 1. DBに変更があるかチェック
-if git diff --quiet threads.db; then
-  echo "📊 データベースに変更なし（投稿なし）"
-else
-  # 2. 変更があればコミット
-  git config user.email "github-actions[bot]@users.noreply.github.com"
-  git config user.name "github-actions[bot]"
-  git add threads.db
-
-  # 3. 今日の投稿数をカウント
-  POSTED_COUNT=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')")
-
-  # 4. コミットメッセージに投稿数を含める
-  git commit -m "Update database: ${POSTED_COUNT} posts published [skip ci]"
-
-  # 5. プッシュ
-  git push
-fi
-```
-
-**コミットメッセージの例:**
-```
-Update database: 9 posts published [skip ci]
-```
-
-**[skip ci] の意味:**
-- GitHub Actions を再トリガーしない
-- 無限ループを防ぐ
 
 ---
 
@@ -249,7 +230,7 @@ Update database: 9 posts published [skip ci]
 2. 検証: 今日のposted=1件 → キャッシュDB使用
 3. 投稿対象: 10件（07:15 〜 12:00）
 4. 投稿実行 → 10件 status='posted'
-5. DBをコミット: "Update database: 11 posts published"
+5. DBをキャッシュに保存
 6. 残りpending: 14件
 ```
 
@@ -259,7 +240,7 @@ Update database: 9 posts published [skip ci]
 2. 検証: 今日のposted=11件 → キャッシュDB使用
 3. 投稿対象: 5件（12:08 〜 18:08）
 4. 投稿実行 → 5件 status='posted'
-5. DBをコミット: "Update database: 16 posts published"
+5. DBをキャッシュに保存
 6. 残りpending: 9件
 ```
 
@@ -269,7 +250,7 @@ Update database: 9 posts published [skip ci]
 2. 検証: 今日のposted=16件 → キャッシュDB使用
 3. 投稿対象: 0件（次の投稿は22:15）
 4. 投稿なし
-5. DBコミットなし
+5. DBはそのまま
 6. 残りpending: 9件
 ```
 
@@ -330,22 +311,22 @@ Update database: 9 posts published [skip ci]
 
 ---
 
-### Q4: リポジトリのDBが更新されるタイミングは？
+### Q4: キャッシュが消えたらどうなる？
 
-**A:** 投稿実行後、自動的にコミットされます。
+**A:** CSVから自動的に再構築されます。
 
-**タイミング:**
-- 投稿スクリプト実行後
-- キャッシュ保存前
-- 投稿がない場合はコミットされない
-
-**コミット例:**
+**キャッシュ消失時の動作:**
 ```bash
-$ git log --oneline -5
-d64c273 Update database: 9 posts published [skip ci]
-f74f60b Fix: Check for today's pending posts instead of total count
-...
+1. キャッシュなし → threads.db が存在しない
+2. CSVから新規インポート
+3. 全ての投稿が status='pending'
+4. scheduled_at <= current_time の投稿を実行
 ```
+
+**影響:**
+- ⚠️ 過去の投稿が再投稿される可能性
+- ✅ 通常は1日1回の実行なので影響は限定的
+- ✅ キャッシュは7日間保持されるため、実質問題なし
 
 ---
 

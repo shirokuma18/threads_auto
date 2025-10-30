@@ -74,11 +74,13 @@ jobs:
 
             # 今日投稿すべきpending投稿がなく、かつ今日のposted投稿もない場合のみリカバリー
             if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
-              echo "⚠️  今日の投稿がありません。リポジトリのthreads.dbを使用します。"
-              git checkout threads.db
+              echo "⚠️  今日の投稿がありません。CSVから再インポートします。"
+              rm -f threads.db
+              python3 migrate_to_sqlite.py init
+              python3 threads_sqlite.py import --csv posts_schedule.csv
               TODAY_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
               TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-              echo "📊 リポジトリDB: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
+              echo "📊 再インポート後: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
             elif [ "$TODAY_POSTED" -gt 0 ]; then
               echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。キャッシュDBを使用します。"
             fi
@@ -90,25 +92,37 @@ jobs:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
 
-      - name: 投稿結果をリポジトリに保存
+      - name: 投稿履歴を更新
+        if: always()
         run: |
-          # 投稿が実行された場合のみコミット
-          if git diff --quiet threads.db; then
-            echo "📊 データベースに変更なし（投稿なし）"
-          else
-            echo "📊 投稿結果をリポジトリにコミット"
-            git config --local user.email "github-actions[bot]@users.noreply.github.com"
-            git config --local user.name "github-actions[bot]"
-            git add threads.db
+          # 今日のposted投稿を posted_history.csv に追加
+          if [ -f threads.db ]; then
+            sqlite3 threads.db -header -csv \
+              "SELECT csv_id, posted_at FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
+              | tail -n +2 >> posted_history.csv
 
-            # 投稿数をカウント
-            POSTED_COUNT=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')")
+            # 重複を削除
+            sort -u posted_history.csv -o posted_history.csv.tmp
+            mv posted_history.csv.tmp posted_history.csv
 
-            git commit -m "Update database: ${POSTED_COUNT} posts published [skip ci]" || true
-            git push || echo "⚠️  プッシュに失敗（競合の可能性）"
+            # ヘッダーを先頭に追加
+            (echo "csv_id,posted_at" && tail -n +2 posted_history.csv | sort -u) > posted_history.csv.tmp
+            mv posted_history.csv.tmp posted_history.csv
+
+            # 変更があればコミット
+            if ! git diff --quiet posted_history.csv; then
+              POSTED_COUNT=$(tail -n +2 posted_history.csv | wc -l | tr -d ' ')
+              echo "📊 投稿履歴を更新: ${POSTED_COUNT} 件"
+
+              git config --local user.email "github-actions[bot]@users.noreply.github.com"
+              git config --local user.name "github-actions[bot]"
+              git add posted_history.csv
+              git commit -m "Update posting history: ${POSTED_COUNT} total posts [skip ci]"
+              git push
+            fi
           fi
 
-      - name: データベースを保存
+      - name: データベースをキャッシュに保存
         uses: actions/cache/save@v3
         if: always()
         with:

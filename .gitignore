@@ -1,6 +1,10 @@
 # 環境変数ファイル（機密情報）
 .env
 
+# データベースファイル（実行時に生成）
+threads.db
+threads.db-*
+
 # 実行時に生成されるファイル
 posted_log.json
 analytics_data.csv
