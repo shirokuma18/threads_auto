@@ -67,17 +67,20 @@ jobs:
             # 今日投稿すべきpending投稿数をチェック
             CURRENT_DATE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
             TODAY_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
+            TODAY_POSTED=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = '$CURRENT_DATE'")
             TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
 
-            echo "📊 pending投稿: 合計 $TOTAL_PENDING 件 / 今日 $TODAY_PENDING 件"
+            echo "📊 キャッシュDB: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件) / posted (今日 $TODAY_POSTED 件)"
 
-            # 今日投稿すべきpending投稿がない場合、リポジトリのthreads.dbを使用
-            if [ "$TODAY_PENDING" -eq 0 ]; then
-              echo "⚠️  今日投稿すべきpending投稿がありません。リポジトリのthreads.dbを使用します。"
+            # 今日投稿すべきpending投稿がなく、かつ今日のposted投稿もない場合のみリカバリー
+            if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
+              echo "⚠️  今日の投稿がありません。リポジトリのthreads.dbを使用します。"
               git checkout threads.db
               TODAY_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
               TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-              echo "📊 復元後: 合計 $TOTAL_PENDING_NEW 件 / 今日 $TODAY_PENDING_NEW 件"
+              echo "📊 リポジトリDB: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
+            elif [ "$TODAY_POSTED" -gt 0 ]; then
+              echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。キャッシュDBを使用します。"
             fi
           fi
 
@@ -86,7 +89,25 @@ jobs:
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-      
+
+      - name: 投稿結果をリポジトリに保存
+        run: |
+          # 投稿が実行された場合のみコミット
+          if git diff --quiet threads.db; then
+            echo "📊 データベースに変更なし（投稿なし）"
+          else
+            echo "📊 投稿結果をリポジトリにコミット"
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            git add threads.db
+
+            # 投稿数をカウント
+            POSTED_COUNT=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')")
+
+            git commit -m "Update database: ${POSTED_COUNT} posts published [skip ci]" || true
+            git push || echo "⚠️  プッシュに失敗（競合の可能性）"
+          fi
+
       - name: データベースを保存
         uses: actions/cache/save@v3
         if: always()
