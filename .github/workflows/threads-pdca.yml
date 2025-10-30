@@ -161,13 +161,6 @@ EOF
           path: threads.db
           key: threads-db-v2-${{ github.sha }}
 
-      - name: データベースサイズをチェック
-        if: always()
-        run: |
-          if [ -f threads.db ]; then
-            python3 check_db_size.py --quiet || true
-          fi
-  
   # PDCAレポート生成ジョブ（3日ごと or 手動）
   pdca-report:
     runs-on: ubuntu-latest
