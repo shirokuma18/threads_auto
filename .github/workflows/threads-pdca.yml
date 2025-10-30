@@ -57,26 +57,37 @@ jobs:
           restore-keys: |
             threads-db-v2-
 
-      - name: データベースを強制再構築（一時的な変更）
+      - name: データベースを初期化（初回のみ）
         run: |
-          echo "🔄 キャッシュをクリアして強制的に再構築します"
-          echo "⚠️  この変更は一時的なものです。実行後、元に戻してください。"
+          if [ ! -f threads.db ]; then
+            echo "📦 データベースを初期化中..."
+            python3 migrate_to_sqlite.py init
+            python3 threads_sqlite.py import --csv posts_schedule.csv
+            echo "✅ データベース初期化完了"
+          else
+            echo "✅ 既存のデータベースを使用"
 
-          # 既存のデータベースを削除
-          rm -f threads.db
+            # 今日投稿すべきpending投稿数をチェック
+            CURRENT_DATE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+            TODAY_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
+            TODAY_POSTED=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = '$CURRENT_DATE'")
+            TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
 
-          # CSVから新規インポート
-          echo "📦 CSVからデータベースを初期化中..."
-          python3 migrate_to_sqlite.py init
-          python3 threads_sqlite.py import --csv posts_schedule.csv
+            echo "📊 キャッシュDB: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件) / posted (今日 $TODAY_POSTED 件)"
 
-          # 結果を確認
-          TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-          CURRENT_DATE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
-          TODAY_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
-
-          echo "📊 再構築後: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件)"
-          echo "✅ データベース初期化完了"
+            # 今日投稿すべきpending投稿がなく、かつ今日のposted投稿もない場合のみリカバリー
+            if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
+              echo "⚠️  今日の投稿がありません。CSVから再インポートします。"
+              rm -f threads.db
+              python3 migrate_to_sqlite.py init
+              python3 threads_sqlite.py import --csv posts_schedule.csv
+              TODAY_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
+              TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
+              echo "📊 再インポート後: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
+            elif [ "$TODAY_POSTED" -gt 0 ]; then
+              echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。キャッシュDBを使用します。"
+            fi
+          fi
 
       - name: 投稿スクリプトを実行
         run: python threads_sqlite.py post
