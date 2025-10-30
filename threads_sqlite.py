@@ -174,7 +174,7 @@ def get_post_insights(threads_post_id):
 # ============================================
 
 def get_pending_posts():
-    """未投稿で投稿時刻を過ぎたものを取得"""
+    """未投稿で投稿時刻を過ぎたものを取得（1件のみ）"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -183,12 +183,14 @@ def get_pending_posts():
     jst = timezone(timedelta(hours=9))
     current_time = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
 
+    # レート制限対策：1回の実行で1件のみ取得
     cursor.execute("""
         SELECT id, csv_id, scheduled_at, text, category
         FROM posts
         WHERE status = 'pending'
           AND scheduled_at <= ?
         ORDER BY scheduled_at
+        LIMIT 1
     """, (current_time,))
 
     posts = cursor.fetchall()
