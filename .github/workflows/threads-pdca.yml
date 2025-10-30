@@ -37,27 +37,25 @@ jobs:
        (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
 
     steps:
-      - name: リポジトリをチェックアウト
+      - name: リポジトリをチェックアウト (automation ブランチ)
         uses: actions/checkout@v3
         with:
+          ref: automation
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
-      
+
       - name: Python環境をセットアップ
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      
+
       - name: 依存関係をインストール
         run: pip install requests
 
-      - name: 前回のデータベースを復元
-        uses: actions/cache@v3
-        with:
-          path: threads.db
-          key: threads-db-v2-${{ github.sha }}
-          restore-keys: |
-            threads-db-v2-
+      - name: Git設定
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
 
       - name: データベースを初期化（初回のみ）
         run: |
@@ -75,7 +73,7 @@ jobs:
             TODAY_POSTED=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = '$CURRENT_DATE'")
             TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
 
-            echo "📊 キャッシュDB: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件) / posted (今日 $TODAY_POSTED 件)"
+            echo "📊 DB状態: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件) / posted (今日 $TODAY_POSTED 件)"
 
             # 今日投稿すべきpending投稿がなく、かつ今日のposted投稿もない場合のみリカバリー
             if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
@@ -87,7 +85,7 @@ jobs:
               TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
               echo "📊 再インポート後: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
             elif [ "$TODAY_POSTED" -gt 0 ]; then
-              echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。キャッシュDBを使用します。"
+              echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。既存DBを使用します。"
             fi
           fi
 
@@ -101,11 +99,6 @@ jobs:
         if: always()
         run: |
           if [ -f threads.db ]; then
-            # automation ブランチに切り替え
-            git fetch origin
-            git checkout automation
-            git pull origin automation
-
             # 1. 今日のposted投稿を posted_history.csv に追加
             sqlite3 threads.db -header -csv \
               "SELECT csv_id, posted_at FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
@@ -131,26 +124,19 @@ jobs:
               python3 cleanup_csv.py "$POSTED_IDS"
             fi
 
-            # 4. 変更があれば automation ブランチにコミット
-            git config --local user.email "github-actions[bot]@users.noreply.github.com"
-            git config --local user.name "github-actions[bot]"
-
-            if ! git diff --quiet posted_history.csv posts_schedule.csv; then
+            # 4. データベース、CSV、履歴ファイルをコミット
+            if ! git diff --quiet posted_history.csv posts_schedule.csv threads.db 2>/dev/null || [ -n "$(git ls-files --others --exclude-standard threads.db)" ]; then
               POSTED_COUNT=$(tail -n +2 posted_history.csv | wc -l | tr -d ' ')
               REMAINING_COUNT=$(tail -n +2 posts_schedule.csv | wc -l | tr -d ' ')
 
-              git add posted_history.csv posts_schedule.csv
+              git add posted_history.csv posts_schedule.csv threads.db
               git commit -m "Update: Posted ${POSTED_COUNT} total, ${REMAINING_COUNT} remaining [auto]"
               git push origin automation
+              echo "✅ データベースと履歴を automation ブランチに保存しました"
+            else
+              echo "📝 変更がないため、コミットをスキップします"
             fi
           fi
-
-      - name: データベースをキャッシュに保存
-        uses: actions/cache/save@v3
-        if: always()
-        with:
-          path: threads.db
-          key: threads-db-v2-${{ github.sha }}
 
   # PDCAレポート生成ジョブ（3日ごと or 手動）
   pdca-report:
@@ -161,40 +147,39 @@ jobs:
        (github.event.inputs.mode == 'pdca' || github.event.inputs.mode == 'full-cycle'))
     
     steps:
-      - name: リポジトリをチェックアウト
+      - name: リポジトリをチェックアウト (automation ブランチ)
         uses: actions/checkout@v3
         with:
+          ref: automation
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+          fetch-depth: 0
+
       - name: Python環境をセットアップ
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      
+
       - name: 依存関係をインストール
         run: pip install requests
 
-      - name: 前回のデータベースを復元
-        uses: actions/cache@v3
-        with:
-          path: threads.db
-          key: threads-db-v2-${{ github.sha }}
-          restore-keys: |
-            threads-db-v2-
+      - name: Git設定
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
 
       - name: PDCAレポートを生成
         run: python threads_sqlite.py pdca
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-      
+
       - name: レポートファイルをコミット
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add pdca_report.md || true
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update PDCA report [skip ci]"
-          git push || true
+          if [ -f pdca_report.md ]; then
+            git add pdca_report.md
+            git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update PDCA report [auto]"
+            git push origin automation || true
+          fi
       
       - name: GitHub Issueにレポートを投稿
         if: always()
