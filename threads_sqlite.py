@@ -174,7 +174,7 @@ def get_post_insights(threads_post_id):
 # ============================================
 
 def get_pending_posts():
-    """未投稿で投稿可能なものを取得（1件のみ）"""
+    """未投稿で投稿可能なものを取得（1件のみ、1日25件制限）"""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -183,21 +183,34 @@ def get_pending_posts():
     jst = timezone(timedelta(hours=9))
     now = datetime.now(jst)
     current_time = now.strftime('%Y-%m-%d %H:%M:%S')
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
 
-    # 古すぎる投稿（2時間以上前）は除外
-    cutoff_time = (now - timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S')
+    # 今日の投稿数をカウント（Threads API制限：1日25件）
+    cursor.execute("""
+        SELECT COUNT(*) as count
+        FROM posts
+        WHERE status = 'posted'
+          AND posted_at >= ?
+    """, (today_start,))
+
+    today_count = cursor.fetchone()['count']
+
+    # 25件に達している場合は投稿しない
+    if today_count >= 25:
+        conn.close()
+        print(f"⚠️  本日の投稿数が上限（25件）に達しています。明日まで待機します。")
+        return []
 
     # レート制限対策：1回の実行で1件のみ取得
-    # scheduled_at が過去のもの（最大2時間前まで）を古い順に取得
+    # scheduled_at が現在時刻以前の未投稿分を古い順に取得
     cursor.execute("""
         SELECT id, csv_id, scheduled_at, text, category
         FROM posts
         WHERE status = 'pending'
-          AND scheduled_at >= ?
           AND scheduled_at <= ?
         ORDER BY scheduled_at
         LIMIT 1
-    """, (cutoff_time, current_time,))
+    """, (current_time,))
 
     posts = cursor.fetchall()
     conn.close()
