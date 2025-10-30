@@ -50,9 +50,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: threads.db
-          key: threads-db-${{ github.sha }}
+          key: threads-db-v2-${{ github.sha }}
           restore-keys: |
-            threads-db-
+            threads-db-v2-
 
       - name: データベースを初期化（初回のみ）
         run: |
@@ -76,7 +76,7 @@ jobs:
         if: always()
         with:
           path: threads.db
-          key: threads-db-${{ github.sha }}
+          key: threads-db-v2-${{ github.sha }}
 
       - name: データベースサイズをチェック
         if: always()
@@ -111,9 +111,9 @@ jobs:
         uses: actions/cache@v3
         with:
           path: threads.db
-          key: threads-db-${{ github.sha }}
+          key: threads-db-v2-${{ github.sha }}
           restore-keys: |
-            threads-db-
+            threads-db-v2-
 
       - name: PDCAレポートを生成
         run: python threads_sqlite.py pdca
