@@ -13,7 +13,7 @@ import argparse
 import os
 import sys
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 
@@ -29,7 +29,8 @@ PDCA_REPORT_FILE = 'pdca_report.md'
 COMPETITOR_REPORT_FILE = 'competitor_report.md'
 
 # レート制限対策（投稿間隔）
-MIN_INTERVAL_SECONDS = 60  # 60秒（1分間隔で投稿）
+# scheduled_atで時刻指定するため、この値は使用されなくなりました
+MIN_INTERVAL_SECONDS = 10  # 10秒（予備的な待機時間）
 
 # ドライランモード
 DRY_RUN = False
@@ -528,7 +529,29 @@ def check_and_post():
         scheduled_at = post['scheduled_at']
         category = post.get('category', '未分類')
 
-        print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
+        # scheduled_atまで待機（未来の場合のみ）
+        scheduled_dt = datetime.fromisoformat(scheduled_at.replace(' ', 'T'))
+        current_time = datetime.now(timezone(timedelta(hours=9)))
+
+        if scheduled_dt > current_time:
+            wait_seconds = (scheduled_dt - current_time).total_seconds()
+
+            # 待機時間の上限チェック（4時間）
+            max_wait = 4 * 60 * 60  # 4時間
+
+            if wait_seconds > max_wait:
+                print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
+                print(f"  ⚠️  scheduled_at ({scheduled_at}) が遠すぎるため次回実行に延期")
+                continue
+
+            wait_minutes = int(wait_seconds / 60)
+            wait_secs = int(wait_seconds % 60)
+            print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
+            print(f"  ⏰ scheduled_at ({scheduled_at}) まで {wait_minutes}分{wait_secs}秒待機...")
+            time.sleep(wait_seconds)
+        else:
+            print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
+
         print(f"  テキスト: {text[:80]}{'...' if len(text) > 80 else ''}")
 
         # 重複チェック
@@ -547,11 +570,6 @@ def check_and_post():
             mark_as_posted(post_id, threads_post_id)
         else:
             mark_as_failed(post_id, "API投稿エラー")
-
-        if i < len(posts) - 1:
-            wait_time = MIN_INTERVAL_SECONDS
-            print(f"  → 次の投稿まで {wait_time}秒待機...")
-            time.sleep(wait_time)
 
 
 # ============================================
