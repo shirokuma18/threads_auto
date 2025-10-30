@@ -1,0 +1,57 @@
+name: Merge Automation to Main
+
+on:
+  # 毎日 JST 0時（UTC 15時）に実行
+  schedule:
+    - cron: '0 15 * * *'
+
+  # 手動実行も可能
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Git設定
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: automation ブランチをマージ
+        run: |
+          # automation ブランチの最新を取得
+          git fetch origin automation
+
+          # コンフリクトがないか確認
+          if git merge-tree $(git merge-base main origin/automation) main origin/automation | grep -q "<<<<<<< "; then
+            echo "⚠️ コンフリクトが検出されました。手動でマージしてください。"
+            exit 1
+          fi
+
+          # マージ実行
+          git merge origin/automation -m "Merge automation updates to main [skip ci]"
+
+          # プッシュ
+          git push origin main
+
+          echo "✅ automation ブランチを main にマージしました"
+
+      - name: マージ結果を通知
+        if: always()
+        run: |
+          if [ $? -eq 0 ]; then
+            echo "✅ マージ成功"
+          else
+            echo "❌ マージ失敗 - 手動でマージしてください"
+          fi

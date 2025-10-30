@@ -109,24 +109,29 @@ threads_auto/
 └── 【GitHub Actions】
     └── .github/workflows/
         ├── threads-pdca.yml            # 投稿+PDCA自動化
+        ├── merge-automation.yml        # automation→main 自動マージ
         └── token-refresh.yml           # トークン監視
 ```
 
 ### データフロー
 
 ```
-[posts_schedule.csv]         予約投稿を追加（手動編集）
+[main ブランチ]
+  posts_schedule.csv         予約投稿を追加（手動編集）
          ↓
-[GitHub Actions]             スケジュール実行（1日4回）
+[GitHub Actions]             スケジュール実行（10分おき）
          ↓
 [threads.db]                 キャッシュから復元 → 投稿実行
          ↓
 [Threads API]                投稿
          ↓
-[posted_history.csv]         投稿履歴に追記
-[posts_schedule.csv]         投稿済み行を自動削除
+[automation ブランチ]
+  posted_history.csv         投稿履歴に追記
+  posts_schedule.csv         投稿済み行を自動削除
          ↓
-[git commit & push]          変更を自動コミット
+[git commit & push]          automation ブランチにコミット [auto]
+         ↓
+[毎日0時]                    automation → main に自動マージ
 ```
 
 ---
@@ -156,6 +161,93 @@ id,datetime,text,status,category
 
 ---
 
+## 🌿 ブランチ運用戦略
+
+### ブランチ構成
+
+このプロジェクトは2つのブランチで運用されます：
+
+```
+main (開発用)
+  ↓ 手動開発・新機能追加
+  ↓
+automation (自動更新用)
+  ← GitHub Actionsが自動コミット
+  ↓
+  ↓ 毎日0時に自動マージ
+  ↓
+main
+```
+
+### ブランチの役割
+
+| ブランチ | 用途 | 更新方法 |
+|---------|------|---------|
+| `main` | 開発・新規投稿追加 | 手動コミット&プッシュ |
+| `automation` | 投稿履歴の自動更新 | GitHub Actionsが自動コミット |
+
+### メリット
+
+✅ **開発がスムーズ**: mainで自由に開発・コミット・プッシュできる
+✅ **コンフリクト回避**: 自動更新は別ブランチなので競合しない
+✅ **レビュー可能**: 自動更新の内容を確認してからマージできる
+✅ **ロールバック簡単**: 問題があれば自動マージ前に戻せる
+
+### 開発フロー
+
+#### 新しい投稿を追加する場合
+
+```bash
+# main ブランチで作業
+git checkout main
+git pull origin main
+
+# posts_schedule.csv を編集
+vim posts_schedule.csv
+
+# コミット&プッシュ
+git add posts_schedule.csv
+git commit -m "Add: 新しい投稿を追加"
+git push origin main
+```
+
+#### automation ブランチを手動でマージする場合
+
+```bash
+# main ブランチに切り替え
+git checkout main
+git pull origin main
+
+# automation ブランチをマージ
+git merge origin/automation -m "Merge automation updates"
+git push origin main
+```
+
+通常は **毎日0時（JST）に自動マージ** されるため、手動マージは不要です。
+
+### 自動マージの仕組み
+
+`.github/workflows/merge-automation.yml`が毎日0時（JST）に実行され、以下を行います：
+
+1. `automation` ブランチの変更を取得
+2. コンフリクトがないか確認
+3. 問題なければ `main` にマージ
+4. コンフリクトがある場合は通知して手動マージを促す
+
+### automation ブランチの内容
+
+GitHub Actionsによって以下のファイルが自動更新されます：
+
+- `posted_history.csv` - 投稿履歴の追記
+- `posts_schedule.csv` - 投稿済み行の削除
+
+コミットメッセージの形式：
+```
+Update: Posted 15 total, 2516 remaining [auto]
+```
+
+---
+
 ## ⚙️ GitHub Actions自動化
 
 ### 投稿スケジュール
@@ -182,10 +274,12 @@ GitHub Actionsタブから手動実行可能:
 
 1. **データベース復元**: GitHub Actionsキャッシュから`threads.db`を復元
 2. **投稿実行**: `python3 threads_sqlite.py post`
-3. **履歴更新**: 投稿済みを`posted_history.csv`に追記
-4. **自動クリーンアップ**: `posts_schedule.csv`から投稿済み行を削除
-5. **コミット**: 変更を自動コミット&プッシュ（`[skip ci]`付き）
-6. **キャッシュ保存**: 更新後の`threads.db`をキャッシュに保存
+3. **ブランチ切り替え**: `automation` ブランチに切り替え
+4. **履歴更新**: 投稿済みを`posted_history.csv`に追記
+5. **自動クリーンアップ**: `posts_schedule.csv`から投稿済み行を削除
+6. **コミット**: `automation` ブランチに自動コミット&プッシュ（`[auto]`付き）
+7. **キャッシュ保存**: 更新後の`threads.db`をキャッシュに保存
+8. **自動マージ**: 毎日0時に `automation` → `main` をマージ
 
 ---
 

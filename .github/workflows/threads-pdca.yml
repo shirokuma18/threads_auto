@@ -35,12 +35,13 @@ jobs:
       github.event_name == 'schedule' ||
       (github.event_name == 'workflow_dispatch' &&
        (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
-    
+
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
       
       - name: Python環境をセットアップ
         uses: actions/setup-python@v4
@@ -100,6 +101,11 @@ jobs:
         if: always()
         run: |
           if [ -f threads.db ]; then
+            # automation ブランチに切り替え
+            git fetch origin
+            git checkout automation
+            git pull origin automation
+
             # 1. 今日のposted投稿を posted_history.csv に追加
             sqlite3 threads.db -header -csv \
               "SELECT csv_id, posted_at FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
@@ -125,7 +131,7 @@ jobs:
               python3 cleanup_csv.py "$POSTED_IDS"
             fi
 
-            # 4. 変更があればコミット
+            # 4. 変更があれば automation ブランチにコミット
             git config --local user.email "github-actions[bot]@users.noreply.github.com"
             git config --local user.name "github-actions[bot]"
 
@@ -134,8 +140,8 @@ jobs:
               REMAINING_COUNT=$(tail -n +2 posts_schedule.csv | wc -l | tr -d ' ')
 
               git add posted_history.csv posts_schedule.csv
-              git commit -m "Update: Posted ${POSTED_COUNT} total, ${REMAINING_COUNT} remaining [skip ci]"
-              git push
+              git commit -m "Update: Posted ${POSTED_COUNT} total, ${REMAINING_COUNT} remaining [auto]"
+              git push origin automation
             fi
           fi
 
