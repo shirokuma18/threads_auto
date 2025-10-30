@@ -61,14 +61,17 @@ def create_threads_post(text):
 
     try:
         create_url = f'{API_BASE_URL}/{USER_ID}/threads'
+        # access_tokenはURLパラメータ、その他はフォームデータとして送信
         create_params = {
-            'media_type': 'TEXT',
-            'text': text,
             'access_token': ACCESS_TOKEN
+        }
+        create_data = {
+            'media_type': 'TEXT',
+            'text': text
         }
 
         print(f"  → コンテナ作成中...")
-        create_response = requests.post(create_url, params=create_params)
+        create_response = requests.post(create_url, params=create_params, data=create_data)
         create_response.raise_for_status()
         container_id = create_response.json().get('id')
 
@@ -78,12 +81,14 @@ def create_threads_post(text):
 
         publish_url = f'{API_BASE_URL}/{USER_ID}/threads_publish'
         publish_params = {
-            'creation_id': container_id,
             'access_token': ACCESS_TOKEN
+        }
+        publish_data = {
+            'creation_id': container_id
         }
 
         print(f"  → 投稿公開中...")
-        publish_response = requests.post(publish_url, params=publish_params)
+        publish_response = requests.post(publish_url, params=publish_params, data=publish_data)
         publish_response.raise_for_status()
 
         post_id = publish_response.json().get('id')
@@ -96,6 +101,12 @@ def create_threads_post(text):
 
     except requests.exceptions.RequestException as e:
         print(f"  ✗ API エラー: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                print(f"  ✗ エラー詳細: {json.dumps(error_detail, indent=2, ensure_ascii=False)}")
+            except:
+                print(f"  ✗ レスポンス: {e.response.text[:200]}")
         return None
 
 
