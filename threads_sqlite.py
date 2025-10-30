@@ -530,8 +530,9 @@ def check_and_post():
         category = post.get('category', '未分類')
 
         # scheduled_atまで待機（未来の場合のみ）
-        scheduled_dt = datetime.fromisoformat(scheduled_at.replace(' ', 'T'))
-        current_time = datetime.now(timezone(timedelta(hours=9)))
+        jst = timezone(timedelta(hours=9))
+        scheduled_dt = datetime.fromisoformat(scheduled_at.replace(' ', 'T')).replace(tzinfo=jst)
+        current_time = datetime.now(jst)
 
         if scheduled_dt > current_time:
             wait_seconds = (scheduled_dt - current_time).total_seconds()
