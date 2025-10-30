@@ -28,8 +28,8 @@ DB_FILE = os.getenv('DB_FILE', 'threads.db')
 PDCA_REPORT_FILE = 'pdca_report.md'
 COMPETITOR_REPORT_FILE = 'competitor_report.md'
 
-# レート制限対策
-MIN_INTERVAL_SECONDS = 3600  # 1時間
+# レート制限対策（投稿間隔）
+MIN_INTERVAL_SECONDS = 10  # 10秒（Threads APIのレート制限を考慮）
 
 # ドライランモード
 DRY_RUN = False
