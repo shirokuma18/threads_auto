@@ -1,8 +1,8 @@
 # 環境変数ファイル（機密情報）
 .env
 
-# データベースファイル（実行時に生成）
-threads.db
+# データベースファイル（automationブランチでGit管理、mainブランチでは無視）
+# threads.db は automationブランチでコミットされます
 threads.db-*
 
 # 実行時に生成されるファイル
