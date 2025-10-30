@@ -118,27 +118,7 @@ jobs:
               echo "📝 投稿済みIDをCSVから削除: $POSTED_IDS"
 
               # 3. posts_schedule.csv から投稿済みの行を削除
-              python3 -c "
-import csv
-import sys
-
-posted_ids = set('$POSTED_IDS'.split(','))
-rows = []
-
-with open('posts_schedule.csv', 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    fieldnames = reader.fieldnames
-    for row in reader:
-        if row['id'] not in posted_ids:
-            rows.append(row)
-
-with open('posts_schedule.csv', 'w', encoding='utf-8', newline='') as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(rows)
-
-print(f'✅ {len(posted_ids)} 件を削除、{len(rows)} 件が残っています')
-"
+              python3 cleanup_csv.py "$POSTED_IDS"
             fi
 
             # 4. 変更があればコミット
