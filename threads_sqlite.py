@@ -166,7 +166,10 @@ def get_pending_posts():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # 日本時間（JST = UTC+9）で現在時刻を取得
+    from datetime import timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    current_time = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
 
     cursor.execute("""
         SELECT id, csv_id, scheduled_at, text, category
