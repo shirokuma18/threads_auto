@@ -48,12 +48,15 @@ def get_db_connection():
     return conn
 
 
-def create_threads_post(text):
-    """Threads APIで投稿を作成"""
+def create_threads_post(text, reply_to_id=None):
+    """Threads APIで投稿を作成（スレッド対応）"""
     global DRY_RUN
 
     if DRY_RUN:
-        print(f"  → [ドライラン] 投稿をシミュレート中...")
+        if reply_to_id:
+            print(f"  → [ドライラン] スレッド投稿をシミュレート中... (返信先: {reply_to_id})")
+        else:
+            print(f"  → [ドライラン] 投稿をシミュレート中...")
         print(f"  → [ドライラン] 実際には投稿されません")
         time.sleep(0.5)
         fake_post_id = f"dry_run_{int(time.time())}"
@@ -71,7 +74,13 @@ def create_threads_post(text):
             'text': text
         }
 
-        print(f"  → コンテナ作成中...")
+        # スレッド投稿の場合はreply_to_idを追加
+        if reply_to_id:
+            create_data['reply_to_id'] = reply_to_id
+            print(f"  → スレッドコンテナ作成中... (返信先: {reply_to_id})")
+        else:
+            print(f"  → コンテナ作成中...")
+
         create_response = requests.post(create_url, params=create_params, data=create_data)
         create_response.raise_for_status()
         container_id = create_response.json().get('id')
@@ -94,7 +103,10 @@ def create_threads_post(text):
 
         post_id = publish_response.json().get('id')
         if post_id:
-            print(f"  ✓ 投稿成功！ (ID: {post_id})")
+            if reply_to_id:
+                print(f"  ✓ スレッド投稿成功！ (ID: {post_id})")
+            else:
+                print(f"  ✓ 投稿成功！ (ID: {post_id})")
             return post_id
         else:
             print(f"  ✗ 投稿IDの取得に失敗")
@@ -204,7 +216,7 @@ def get_pending_posts():
     # レート制限対策：1回の実行で1件のみ取得
     # scheduled_at が現在時刻以前の未投稿分を古い順に取得
     cursor.execute("""
-        SELECT id, csv_id, scheduled_at, text, category
+        SELECT id, csv_id, scheduled_at, text, category, thread_text
         FROM posts
         WHERE status = 'pending'
           AND scheduled_at <= ?
@@ -424,6 +436,7 @@ def import_from_csv(csv_file):
             datetime_str = row.get('datetime', '').strip()
             text = row.get('text', '').strip()
             category = row.get('category', '').strip() or None
+            thread_text = row.get('thread_text', '').strip() or None
 
             if not csv_id or not datetime_str or not text:
                 skipped += 1
@@ -439,10 +452,10 @@ def import_from_csv(csv_file):
 
                 cursor.execute("""
                     INSERT INTO posts (
-                        csv_id, scheduled_at, text, status,
+                        csv_id, scheduled_at, text, thread_text, status,
                         category, char_count, has_emoji
-                    ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
-                """, (csv_id, scheduled_at, text, category, char_count, has_emoji))
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+                """, (csv_id, scheduled_at, text, thread_text, category, char_count, has_emoji))
 
                 imported += 1
 
@@ -549,6 +562,7 @@ def check_and_post():
         text = post['text']
         scheduled_at = post['scheduled_at']
         category = post.get('category', '未分類')
+        thread_text = post.get('thread_text', '')
 
         # scheduled_atまで待機（未来の場合のみ）
         jst = timezone(timedelta(hours=9))
@@ -575,6 +589,8 @@ def check_and_post():
             print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
 
         print(f"  テキスト: {text[:80]}{'...' if len(text) > 80 else ''}")
+        if thread_text:
+            print(f"  スレッド: あり（{len(thread_text)}文字）")
 
         # 重複チェック
         if csv_id in posted_ids:
@@ -586,9 +602,18 @@ def check_and_post():
             print(f"  → [ドライラン] 実際には投稿されません")
             continue
 
+        # メイン投稿を作成
         threads_post_id = create_threads_post(text)
 
         if threads_post_id:
+            # スレッド投稿がある場合は続けて投稿
+            if thread_text and thread_text.strip():
+                print(f"  → スレッド投稿を作成中...")
+                time.sleep(2)  # レート制限を避けるため少し待機
+                thread_post_id = create_threads_post(thread_text, reply_to_id=threads_post_id)
+                if not thread_post_id:
+                    print(f"  ⚠️  スレッド投稿に失敗しましたが、メイン投稿は成功")
+
             mark_as_posted(post_id, threads_post_id)
         else:
             mark_as_failed(post_id, "API投稿エラー")

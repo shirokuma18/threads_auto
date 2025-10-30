@@ -33,6 +33,7 @@ def create_database():
             csv_id TEXT UNIQUE,
             scheduled_at DATETIME NOT NULL,
             text TEXT NOT NULL,
+            thread_text TEXT,
             status TEXT DEFAULT 'pending',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -131,6 +132,7 @@ def import_csv(csv_file=CSV_FILE):
             csv_id = row.get('id', '').strip()
             datetime_str = row.get('datetime', '').strip()
             text = row.get('text', '').strip()
+            thread_text = row.get('thread_text', '').strip() or None
 
             if not csv_id or not datetime_str or not text:
                 print(f"  ⚠ スキップ: 不完全なデータ (ID: {csv_id})")
@@ -151,10 +153,10 @@ def import_csv(csv_file=CSV_FILE):
                 # 挿入
                 cursor.execute("""
                     INSERT INTO posts (
-                        csv_id, scheduled_at, text, status,
+                        csv_id, scheduled_at, text, thread_text, status,
                         char_count, has_emoji, category
-                    ) VALUES (?, ?, ?, 'pending', ?, ?, ?)
-                """, (csv_id, scheduled_at, text, char_count, has_emoji, category))
+                    ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
+                """, (csv_id, scheduled_at, text, thread_text, char_count, has_emoji, category))
 
                 imported += 1
 
