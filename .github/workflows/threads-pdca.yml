@@ -4,6 +4,8 @@ on:
   # 1日4回投稿チェック（日本時間 8時、12時、18時、21時）
   schedule:
     - cron: '0 23,3,9,12 * * *'
+    # テスト実行（日本時間 9:20） - 動作確認後に削除
+    - cron: '20 0 * * *'
     
     # 3日ごとにPDCAレポート生成（日本時間 20時）
     - cron: '0 11 */3 * *'
@@ -28,7 +30,8 @@ jobs:
     # 23,3,9,12時（UTC）に実行、またはpost/full-cycleモード
     if: |
       (github.event.schedule == '0 23,3,9,12 * * *') ||
-      (github.event_name == 'workflow_dispatch' && 
+      (github.event.schedule == '20 0 * * *') ||
+      (github.event_name == 'workflow_dispatch' &&
        (github.event.inputs.mode == 'post' || github.event.inputs.mode == 'full-cycle'))
     
     steps:
