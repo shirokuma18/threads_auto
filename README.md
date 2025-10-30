@@ -1,35 +1,35 @@
-# 🚀 Threads自動投稿 + PDCA分析ツール
+# 🚀 Threads自動投稿 + PDCA分析システム
 
-Threads APIを使った予約投稿とPDCA分析を自動化するツール（SQLite版）
+Threads APIを使った予約投稿とPDCA分析を自動化するツール
 
 ## 📋 目次
 
 - [特徴](#特徴)
 - [セットアップ](#セットアップ)
+- [ファイル構成](#ファイル構成)
 - [使い方](#使い方)
-- [投稿管理](#投稿管理)
-- [PDCA分析](#pdca分析)
-- [ディレクトリ構成](#ディレクトリ構成)
-- [CSVからの移行](#csvからの移行)
+- [GitHub Actions自動化](#github-actions自動化)
+- [投稿の流れ](#投稿の流れ)
+- [ローカル分析](#ローカル分析)
+- [トラブルシューティング](#トラブルシューティング)
 
 ---
 
 ## ✨ 特徴
 
 ### コア機能
-- **SQLiteベースの投稿管理** - 大量の投稿も高速処理
-- **予約投稿** - 指定時刻に自動投稿
-- **PDCA分析** - エンゲージメント分析とレポート自動生成
-- **投稿ステータス管理** - pending / posted / failed
-- **カテゴリ自動検出** - 恋愛、仕事、お金、メンタル、占い
-- **ドライランモード** - 実際に投稿せずにテスト可能
+- **確実な予約投稿** - 1日4回（8時、12時、18時、21時 JST）自動投稿
+- **重複投稿防止** - 2層チェック（DB + CSV履歴）で安全
+- **自動クリーンアップ** - 投稿済みを自動削除、posts_schedule.csvを常に最新に
+- **ローカル分析** - Threads APIで過去投稿を分析、結果はローカル保存
+- **トークン管理** - 長期トークン（60日）の自動監視
 
-### SQLite移行のメリット
-- ✅ 9,000件以上の投稿でも高速
-- ✅ 未投稿のみをクエリで取得
-- ✅ SQLで高度な分析が可能
-- ✅ データの整合性とトランザクション
-- ✅ CSVインポート/エクスポート可能
+### アーキテクチャの特徴
+- ✅ DBはGitHub Actionsキャッシュで管理（git競合なし）
+- ✅ posts_schedule.csvが唯一の予約マスターデータ
+- ✅ posted_history.csvで重複を防止
+- ✅ 開発環境でのgit pullが不要
+- ✅ リポジトリサイズが増えない設計
 
 ---
 
@@ -45,296 +45,343 @@ cd threads_auto
 ### 2. 依存関係のインストール
 
 ```bash
-pip install -r requirements.txt
+pip install requests
 ```
 
-### 3. Threads API認証情報の取得
+### 3. Threads APIトークンの取得
 
-1. [Meta for Developers](https://developers.facebook.com/)にアクセス
-2. アプリを作成
-3. Threads APIを有効化
-4. アクセストークンとユーザーIDを取得
+詳細は **[TOKEN_SETUP.md](TOKEN_SETUP.md)** を参照してください。
 
-### 4. 環境変数の設定
+**簡易手順:**
+
+1. [Meta for Developers](https://developers.facebook.com/)でアプリ作成
+2. Threads APIを有効化
+3. 短期トークンを取得
+4. 長期トークン（60日）に変換
 
 ```bash
-cp .env.example .env
+python3 setup_long_lived_token.py
 ```
 
-`.env`ファイルを編集:
+### 4. GitHub Secretsの設定
 
-```bash
-THREADS_ACCESS_TOKEN=your_access_token_here
-THREADS_USER_ID=your_user_id_here
+GitHubリポジトリの `Settings > Secrets and variables > Actions` で設定:
+
+- `THREADS_ACCESS_TOKEN` - 長期トークン
+- `THREADS_USER_ID` - ユーザーID
+
+### 5. 初回実行
+
+GitHub Actionsワークフローを手動実行すると、自動的にDBが初期化されます。
+
+---
+
+## 📁 ファイル構成
+
+### 必須ファイル
+
+```
+threads_auto/
+├── README.md                           # このファイル
+├── .env                                # ローカル用環境変数（.gitignore）
+├── .gitignore                          # Git除外設定
+│
+├── 【予約投稿管理】
+├── posts_schedule.csv                  # 予約投稿マスターデータ（git追跡）
+├── posted_history.csv                  # 投稿履歴（重複防止用、git追跡）
+├── threads.db                          # 実行時DB（GitHub Actionsキャッシュ、.gitignore）
+│
+├── 【実行スクリプト】
+├── threads_sqlite.py                   # メイン投稿スクリプト
+├── migrate_to_sqlite.py                # DB初期化・CSVインポート
+├── setup_long_lived_token.py           # トークン取得・更新
+├── analyze_local.py                    # ローカル分析スクリプト
+├── check_db_size.py                    # DBサイズチェック
+│
+├── 【ドキュメント】
+├── TOKEN_SETUP.md                      # トークン設定ガイド
+├── CONTENT_MANAGEMENT.md               # コンテンツ管理ガイド
+├── POSTING_LOGIC.md                    # 投稿ロジック詳細
+├── POST_CREATION_MANUAL.md             # 投稿作成マニュアル（ペルソナ）
+├── VIRAL_POST_STRATEGY.md              # バズる投稿戦略（ペルソナ）
+├── EXPERIMENT_DAY1-3.md                # 実験レポート（参考）
+│
+└── 【GitHub Actions】
+    └── .github/workflows/
+        ├── threads-pdca.yml            # 投稿+PDCA自動化
+        └── token-refresh.yml           # トークン監視
 ```
 
-### 5. データベースの初期化
+### データフロー
 
-**既存CSVがある場合（マイグレーション）:**
-
-```bash
-python3 migrate_to_sqlite.py full
 ```
-
-**新規セットアップの場合:**
-
-```bash
-python3 migrate_to_sqlite.py init
+[posts_schedule.csv]         予約投稿を追加（手動編集）
+         ↓
+[GitHub Actions]             スケジュール実行（1日4回）
+         ↓
+[threads.db]                 キャッシュから復元 → 投稿実行
+         ↓
+[Threads API]                投稿
+         ↓
+[posted_history.csv]         投稿履歴に追記
+[posts_schedule.csv]         投稿済み行を自動削除
+         ↓
+[git commit & push]          変更を自動コミット
 ```
 
 ---
 
 ## 🚀 使い方
 
-### 投稿実行
+### 新しい投稿を追加
 
-```bash
-# 投稿時刻になった投稿を自動実行
-python3 threads_sqlite.py post
-
-# ドライランモード（実際には投稿しない）
-python3 threads_sqlite.py post --dry-run
-```
-
-### 投稿一覧
-
-```bash
-# 全投稿を表示
-python3 threads_sqlite.py list
-
-# 未投稿のみ
-python3 threads_sqlite.py list --status pending
-
-# 今日の予定
-python3 threads_sqlite.py list --today
-
-# 明日の予定
-python3 threads_sqlite.py list --tomorrow
-
-# 表示件数を指定
-python3 threads_sqlite.py list --limit 10
-```
-
----
-
-## 📝 投稿管理
-
-### 投稿を追加
-
-```bash
-python3 threads_sqlite.py add \
-  --datetime "2025-11-02 08:00" \
-  --text "私「最近...」友人「...」" \
-  --category "恋愛"
-```
-
-### CSVからインポート
-
-```bash
-python3 threads_sqlite.py import --csv new_posts.csv
-```
-
-**CSVフォーマット:**
+`posts_schedule.csv`を編集して、新しい行を追加:
 
 ```csv
 id,datetime,text,status,category
-1,2025-11-01 08:00,"投稿テキスト",pending,恋愛
-2,2025-11-01 12:00,"投稿テキスト",pending,仕事
+101,2025-11-03 08:00,"投稿テキスト...",pending,恋愛
+102,2025-11-03 12:00,"投稿テキスト...",pending,仕事
 ```
 
-### CSVにエクスポート
+コミット&プッシュすると、GitHub Actionsが自動で投稿します。
 
-```bash
-# 全投稿をエクスポート
-python3 threads_sqlite.py export --output backup.csv
+### 投稿作成のガイドライン
 
-# 未投稿のみエクスポート
-python3 threads_sqlite.py export --output pending.csv --status pending
-```
+詳細は **[CONTENT_MANAGEMENT.md](CONTENT_MANAGEMENT.md)** を参照:
 
----
-
-## 📊 PDCA分析
-
-### 基本的な使い方
-
-```bash
-# 過去3日間のPDCAレポートを生成
-python3 threads_sqlite.py pdca
-
-# カスタム期間
-python3 threads_sqlite.py pdca --days 7
-```
-
-### レポート内容
-
-生成されるレポート（`pdca_report.md`）には以下が含まれます:
-
-- 📈 **サマリー** - 総表示回数、エンゲージメント率
-- 🏆 **トップパフォーマンス投稿** - 反応が良かった投稿
-- 🎯 **カテゴリ別パフォーマンス** - どのテーマが効果的か
-- ⏰ **ベスト投稿時間帯** - 最も反応が良い時間
-- 📝 **コンテンツ分析** - 文字数、絵文字の効果
-- ⚠️ **改善が必要な投稿** - 反応が悪かった投稿
-- 💡 **次のアクションプラン** - Keep/Improve/Try
-
----
-
-## 📁 ディレクトリ構成
-
-```
-threads_auto/
-├── README.md                    # このファイル
-├── requirements.txt             # Python依存関係
-├── .env                         # 環境変数（要作成）
-├── .gitignore                   # Git除外設定
-│
-├── threads_sqlite.py            # メインスクリプト
-├── migrate_to_sqlite.py         # マイグレーションツール
-├── threads.db                   # SQLiteデータベース
-│
-├── POST_CREATION_MANUAL.md      # 投稿作成マニュアル
-├── VIRAL_POST_STRATEGY.md       # バズる投稿戦略
-│
-├── posts_schedule.csv           # CSVバックアップ（オプション）
-├── pdca_report.md               # 生成されたレポート
-│
-└── archive/                     # 古いファイル
-    ├── threads_pdca.py          # 旧版スクリプト（CSV版）
-    └── ...
-```
-
----
-
-## 🗄️ データベース構造
-
-### postsテーブル
-
-| カラム | 型 | 説明 |
-|--------|----|----|
-| id | INTEGER | 主キー |
-| csv_id | TEXT | CSV互換ID |
-| scheduled_at | DATETIME | 投稿予定時刻 |
-| text | TEXT | 投稿テキスト |
-| status | TEXT | pending / posted / failed |
-| category | TEXT | 恋愛、仕事、お金、メンタル、占い |
-| threads_post_id | TEXT | Threads投稿ID |
-| posted_at | DATETIME | 実際の投稿時刻 |
-
-### analyticsテーブル
-
-| カラム | 型 | 説明 |
-|--------|----|----|
-| id | INTEGER | 主キー |
-| post_id | INTEGER | postsテーブルの外部キー |
-| views | INTEGER | 表示回数 |
-| likes | INTEGER | いいね数 |
-| replies | INTEGER | 返信数 |
-| engagement_rate | REAL | エンゲージメント率 |
-
----
-
-## 📖 関連ドキュメント
-
-- **[POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md)** - 投稿作成の完全ガイド
-  - ターゲットペルソナ
-  - 絶対NGルール
-  - バズる投稿の6つの法則
-  - 3つのテンプレート
-  - チェックリスト
-
-- **[VIRAL_POST_STRATEGY.md](VIRAL_POST_STRATEGY.md)** - バズる投稿戦略
-  - バズる投稿の絶対ルール
-  - 投稿フォーマット
-  - 投稿時間戦略
-  - KPI目標
-  - PDCA改善
-
----
-
-## 🔄 CSVからの移行
-
-既存のCSVファイルがある場合、以下のコマンドで簡単に移行できます:
-
-```bash
-# 1. データベース作成 + CSVインポート + ログ統合
-python3 migrate_to_sqlite.py full
-
-# 2. 統計確認
-python3 migrate_to_sqlite.py stats
-
-# 3. 新スクリプトでテスト
-python3 threads_sqlite.py post --dry-run
-```
+- **投稿フォーマット**: 会話形式、500文字前後
+- **カテゴリ**: 恋愛、仕事、お金、メンタル、占い
+- **投稿時間**: 8時、12時、18時、21時 JST
+- **ペルソナ**: 20-30代の社会人女性
 
 ---
 
 ## ⚙️ GitHub Actions自動化
 
-### ワークフロー設定
+### 投稿スケジュール
 
-`.github/workflows/threads_auto.yml`を作成:
+`.github/workflows/threads-pdca.yml`で自動実行:
 
-```yaml
-name: Threads Auto Post
+| 時刻（JST） | 時刻（UTC） | 実行内容 |
+|------------|------------|---------|
+| 8:00       | 23:00      | 投稿チェック |
+| 12:00      | 3:00       | 投稿チェック |
+| 18:00      | 9:00       | 投稿チェック |
+| 21:00      | 12:00      | 投稿チェック |
+| 20:00（3日ごと） | 11:00 | PDCAレポート生成 |
 
-on:
-  schedule:
-    - cron: '0 * * * *'  # 毎時実行
-  workflow_dispatch:
+### 手動実行
 
-jobs:
-  post:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
+GitHub Actionsタブから手動実行可能:
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+- **post**: 投稿のみ実行
+- **pdca**: PDCAレポートのみ生成
+- **full-cycle**: 投稿 + PDCAレポート
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+### 自動処理の内容
 
-      - name: Run posting
-        env:
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-        run: python3 threads_sqlite.py post
-```
-
-### Secrets設定
-
-GitHubリポジトリの Settings > Secrets and variables > Actions で以下を設定:
-
-- `THREADS_ACCESS_TOKEN`
-- `THREADS_USER_ID`
+1. **データベース復元**: GitHub Actionsキャッシュから`threads.db`を復元
+2. **投稿実行**: `python3 threads_sqlite.py post`
+3. **履歴更新**: 投稿済みを`posted_history.csv`に追記
+4. **自動クリーンアップ**: `posts_schedule.csv`から投稿済み行を削除
+5. **コミット**: 変更を自動コミット&プッシュ（`[skip ci]`付き）
+6. **キャッシュ保存**: 更新後の`threads.db`をキャッシュに保存
 
 ---
 
-## 🧪 テスト
+## 📝 投稿の流れ
 
-### ドライランモード
+### 投稿ルール
 
-実際には投稿せず、動作確認のみ行います:
+詳細は **[POSTING_LOGIC.md](POSTING_LOGIC.md)** を参照。
 
-```bash
-python3 threads_sqlite.py post --dry-run
+**投稿条件:**
+```
+scheduled_at <= 現在時刻（JST）
+かつ
+status = 'pending'
+かつ
+posted_history.csvに記録なし
 ```
 
-### テスト投稿の追加
+**実行間隔:**
+- 投稿間隔: 10秒
+- タイムアウト: 2分
 
-過去の時刻で投稿を追加すると、すぐに実行されます:
+### 重複防止の仕組み
+
+2層チェックで確実に重複を防ぎます:
+
+1. **DB状態チェック**: `status = 'pending'`のみ取得
+2. **CSV履歴チェック**: `posted_history.csv`に記録がないか確認
+
+これにより、キャッシュが期限切れになっても重複投稿しません。
+
+### DBリカバリー
+
+キャッシュが無効になった場合の自動リカバリー:
 
 ```bash
-python3 threads_sqlite.py add \
-  --datetime "2025-10-30 10:00" \
-  --text "テスト投稿" \
-  --category "テスト"
-
-python3 threads_sqlite.py post --dry-run
+# 今日投稿すべきpending投稿 = 0
+# かつ
+# 今日のposted投稿 = 0
+# の場合のみ、CSVから再インポート
 ```
+
+---
+
+## 📊 ローカル分析
+
+### 分析スクリプトの実行
+
+```bash
+# 環境変数を読み込み
+export $(cat .env | xargs)
+
+# 分析実行（最新20件の投稿を分析）
+python3 analyze_local.py
+```
+
+### 生成されるファイル
+
+分析結果はローカルのみに保存されます（`.gitignore`に含まれる）:
+
+- `analysis_results.json` - 詳細な分析データ
+- `analysis_report.md` - 人間が読みやすいレポート
+
+### レポート内容
+
+- 📈 サマリー（ビュー数、いいね数、エンゲージメント率）
+- 🔥 エンゲージメント率 TOP 5
+- ❤️ いいね数 TOP 5
+- 💡 改善ポイント
+
+### 分析結果の活用方法
+
+1. `analysis_report.md`を確認
+2. 反応が良かった投稿の特徴を分析
+3. 新しい投稿を`posts_schedule.csv`に追加
+4. `git push`でデプロイ
+
+---
+
+## 🔄 トークン管理
+
+### トークンの有効期限
+
+- **長期トークン**: 60日間有効
+- **自動監視**: 毎週日曜 20:00 JST にチェック
+
+### トークンが期限切れになった場合
+
+GitHub Issueに自動通知されます:
+
+1. Issuesタブで通知を確認
+2. 新しい短期トークンを取得（[Meta for Developers](https://developers.facebook.com/)）
+3. 長期トークンに変換:
+   ```bash
+   python3 setup_long_lived_token.py
+   ```
+4. GitHub Secretsを更新
+
+詳細は **[TOKEN_SETUP.md](TOKEN_SETUP.md)** を参照。
+
+---
+
+## 📊 PDCA分析（GitHub Actions）
+
+### レポート生成
+
+3日ごとに自動生成される`pdca_report.md`には以下が含まれます:
+
+- 📈 サマリー（期間内の総計）
+- 🏆 トップパフォーマンス投稿
+- 🎯 カテゴリ別パフォーマンス
+- ⏰ ベスト投稿時間帯
+- 💡 次のアクションプラン（Keep/Improve/Try）
+
+レポートは自動的にGitHub Issueに投稿されます。
+
+---
+
+## 🔧 トラブルシューティング
+
+### 投稿が実行されない
+
+1. **posts_schedule.csvを確認**
+   - `datetime`が現在時刻より過去か？
+   - `status`が`pending`になっているか？
+
+2. **GitHub Actionsログを確認**
+   - Actionsタブで最新の実行ログを確認
+   - エラーメッセージをチェック
+
+3. **手動実行でテスト**
+   - GitHub Actionsタブで手動実行
+   - モード: `post`
+
+### トークンエラー
+
+```
+Error validating access token: Session has expired
+```
+
+→ **[TOKEN_SETUP.md](TOKEN_SETUP.md)** を参照してトークンを再取得
+
+### DBキャッシュが無効になった
+
+通常は自動でリカバリーされますが、手動で確認したい場合:
+
+```bash
+# ローカルでDBを初期化
+python3 migrate_to_sqlite.py init
+python3 threads_sqlite.py import --csv posts_schedule.csv
+
+# 状態を確認
+sqlite3 threads.db "SELECT COUNT(*), status FROM posts GROUP BY status"
+```
+
+### 重複投稿が発生した場合
+
+`posted_history.csv`に該当する`csv_id`が記録されていれば、次回から投稿されません。
+
+手動で追加する場合:
+```bash
+echo "csv_id,posted_at" > posted_history.csv
+echo "101,2025-11-01 08:15:23" >> posted_history.csv
+```
+
+---
+
+## 📖 関連ドキュメント
+
+### 投稿管理
+- **[CONTENT_MANAGEMENT.md](CONTENT_MANAGEMENT.md)** - コンテンツ管理の完全ガイド
+  - ファイル構成と役割
+  - 投稿追加方法
+  - 重複防止の仕組み
+
+- **[POSTING_LOGIC.md](POSTING_LOGIC.md)** - 投稿ロジックの詳細
+  - 投稿スケジュール
+  - 投稿選択ルール
+  - DB状態管理
+
+### トークン管理
+- **[TOKEN_SETUP.md](TOKEN_SETUP.md)** - トークン設定の完全ガイド
+  - 短期トークンの取得
+  - 長期トークンへの変換
+  - 自動監視の仕組み
+
+### コンテンツ作成
+- **[POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md)** - 投稿作成マニュアル
+  - ターゲットペルソナ
+  - 絶対NGルール
+  - バズる投稿の6つの法則
+
+- **[VIRAL_POST_STRATEGY.md](VIRAL_POST_STRATEGY.md)** - バズる投稿戦略
+  - 投稿フォーマット
+  - 投稿時間戦略
+  - KPI目標
 
 ---
 
@@ -342,21 +389,21 @@ python3 threads_sqlite.py post --dry-run
 
 ### 推奨投稿頻度
 
-- **1日25投稿** - 4つの時間帯に分散
-  - 8時台: 6投稿（通勤中）
-  - 12時台: 6投稿（昼休み）
-  - 18時台: 6投稿（帰宅後）
-  - 21時台: 7投稿（就寝前）
+- **1日4回** - 4つの時間帯に分散
+  - 8時台: 通勤中
+  - 12時台: 昼休み
+  - 18時台: 帰宅後
+  - 21時台: 就寝前
 
 ### コンテンツMix
 
-| カテゴリ | 割合 | 投稿数/日 |
-|---------|------|-----------|
-| 恋愛・出会い | 30% | 8投稿 |
-| 仕事・転職 | 25% | 6投稿 |
-| お金・貯金 | 20% | 5投稿 |
-| メンタル | 15% | 4投稿 |
-| 占い | 10% | 2投稿 |
+| カテゴリ | 割合 | 特徴 |
+|---------|------|------|
+| 恋愛・出会い | 30% | 共感されやすい |
+| 仕事・転職 | 25% | 保存されやすい |
+| お金・貯金 | 20% | シェアされやすい |
+| メンタル | 15% | いいねが多い |
+| 占い | 10% | エンゲージメント高い |
 
 ### 投稿フォーマット
 
@@ -368,50 +415,17 @@ python3 threads_sqlite.py post --dry-run
 - ✅ **リスト形式** - 保存されやすい
 - ✅ **ビフォーアフター** - 気づきを与える
 
-詳細は [POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md) を参照。
-
----
-
-## 🔧 トラブルシューティング
-
-### データベースが見つからない
-
-```bash
-python3 migrate_to_sqlite.py init
-```
-
-### 投稿が実行されない
-
-1. 投稿予定時刻を確認:
-   ```bash
-   python3 threads_sqlite.py list --status pending --limit 5
-   ```
-
-2. 現在時刻より過去の時刻に設定されているか確認
-
-3. ドライランで動作確認:
-   ```bash
-   python3 threads_sqlite.py post --dry-run
-   ```
-
-### API認証エラー
-
-1. 環境変数が正しく設定されているか確認:
-   ```bash
-   echo $THREADS_ACCESS_TOKEN
-   echo $THREADS_USER_ID
-   ```
-
-2. アクセストークンの有効期限を確認
-
 ---
 
 ## 💾 データベースサイズ管理
 
 ### GitHubの制限
 
-- **ファイルサイズ**: 50MB以上で警告、100MB以上はプッシュ不可
-- **リポジトリサイズ**: 推奨1GB以下
+threads.dbは`.gitignore`に含まれているため、リポジトリサイズに影響しません。
+
+GitHub Actionsキャッシュの制限:
+- **保存期間**: 7日間（定期実行で自動更新）
+- **サイズ制限**: 10GB（十分な容量）
 
 ### サイズチェック
 
@@ -423,80 +437,49 @@ python3 check_db_size.py
 python3 check_db_size.py --quiet
 ```
 
-**出力例:**
-```
-✅ OK: DBサイズは正常範囲内です
-   現在: 0.10 MB / 40 MB
+---
 
-📈 データベース統計:
-   総投稿数: 29件
-   投稿済み: 1件
+## 🎯 クイックスタート
 
-🔮 サイズ予測:
-   1投稿あたり: 3.45 KB
-   1年後の予測: 30.83 MB
-```
-
-### 自動チェック（pre-commit hook）
-
-コミット前に自動でDBサイズをチェックします：
-
-- **40MB以上**: 警告（コミットは可能）
-- **90MB以上**: エラー（コミット中止）
-
-### データアーカイブ
-
-古いデータをCSVにエクスポートしてDBから削除：
+### 1. 環境構築（初回のみ）
 
 ```bash
-# 90日前より古いデータをエクスポート（削除しない）
-python3 archive_old_posts.py --older-than 90
+# 1. リポジトリをクローン
+git clone <repository-url>
+cd threads_auto
 
-# エクスポート + DBから削除
-python3 archive_old_posts.py --older-than 90 --delete
+# 2. トークンを取得
+python3 setup_long_lived_token.py
 
-# 1年前より古いデータを削除
-python3 archive_old_posts.py --older-than 365 --delete
+# 3. GitHub Secretsを設定
+# Settings > Secrets and variables > Actions
+# - THREADS_ACCESS_TOKEN
+# - THREADS_USER_ID
 ```
 
-アーカイブされたデータは `archive/posts/` に保存されます。
-
-### DBサイズ最適化
+### 2. 投稿を追加
 
 ```bash
-# VACUUMで最適化（削除後の空き領域を回収）
-sqlite3 threads.db 'VACUUM;'
+# posts_schedule.csvを編集
+# 新しい行を追加:
+# 103,2025-11-03 08:00,"投稿テキスト...",pending,恋愛
 
-# 最適化後のサイズ確認
-python3 check_db_size.py
+# コミット&プッシュ
+git add posts_schedule.csv
+git commit -m "Add: 新しい投稿を追加"
+git push
 ```
 
-### GitHubからDBを除外（推奨）
+### 3. 自動投稿を確認
 
-大量のコミットでGitHub容量を消費しないよう、DBをGitから除外することを推奨：
-
-```bash
-# .gitignoreに追加
-echo 'threads.db' >> .gitignore
-
-# 既にコミット済みの場合は削除
-git rm --cached threads.db
-git commit -m "Remove threads.db from Git tracking"
-```
-
-**代替案**: GitHub Actionsで使う場合は、artifactsとして保存します（ワークフロー例参照）。
+- GitHub Actionsタブで実行状況を確認
+- 投稿後、`posted_history.csv`と`posts_schedule.csv`が自動更新される
 
 ---
 
 ## 📝 ライセンス
 
 MIT License
-
----
-
-## 🤝 コントリビューション
-
-Issue や Pull Request は大歓迎です！
 
 ---
 

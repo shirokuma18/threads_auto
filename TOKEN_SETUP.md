@@ -195,19 +195,6 @@ https://github.com/ibkuroyagi/threads_auto/settings/secrets/actions
 2. 「Token Auto-Refresh」ワークフローを確認
 3. 実行結果のサマリーでトークンの状態を確認
 
-### トークンリフレッシュ（実験的）
-
-**注意:** Threads API では現在、トークンの自動リフレッシュがサポートされていない可能性があります。
-
-**手動リフレッシュの試行:**
-```bash
-# .envファイルからトークンを読み込んでリフレッシュを試みる
-export THREADS_ACCESS_TOKEN=$(grep THREADS_ACCESS_TOKEN .env | cut -d '=' -f2)
-python3 refresh_token.py
-```
-
-もしリフレッシュがサポートされていない場合は、以下の手動更新を行ってください。
-
 ### 手動更新のタイミング
 
 長期トークンは **60日間** 有効です。
