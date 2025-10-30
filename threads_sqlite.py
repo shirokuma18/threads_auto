@@ -29,7 +29,7 @@ PDCA_REPORT_FILE = 'pdca_report.md'
 COMPETITOR_REPORT_FILE = 'competitor_report.md'
 
 # レート制限対策（投稿間隔）
-MIN_INTERVAL_SECONDS = 10  # 10秒（Threads APIのレート制限を考慮）
+MIN_INTERVAL_SECONDS = 60  # 60秒（1分間隔で投稿）
 
 # ドライランモード
 DRY_RUN = False
