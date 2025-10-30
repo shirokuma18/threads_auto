@@ -64,16 +64,20 @@ jobs:
           else
             echo "✅ 既存のデータベースを使用"
 
-            # pending投稿数をチェック
-            PENDING_COUNT=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-            echo "📊 pending投稿数: $PENDING_COUNT 件"
+            # 今日投稿すべきpending投稿数をチェック
+            CURRENT_DATE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
+            TODAY_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
+            TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
 
-            # pending投稿が10件未満の場合、リポジトリのthreads.dbを使用
-            if [ "$PENDING_COUNT" -lt 10 ]; then
-              echo "⚠️  pending投稿が少なすぎます。リポジトリのthreads.dbを使用します。"
+            echo "📊 pending投稿: 合計 $TOTAL_PENDING 件 / 今日 $TODAY_PENDING 件"
+
+            # 今日投稿すべきpending投稿がない場合、リポジトリのthreads.dbを使用
+            if [ "$TODAY_PENDING" -eq 0 ]; then
+              echo "⚠️  今日投稿すべきpending投稿がありません。リポジトリのthreads.dbを使用します。"
               git checkout threads.db
-              PENDING_COUNT_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-              echo "📊 復元後のpending投稿数: $PENDING_COUNT_NEW 件"
+              TODAY_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
+              TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
+              echo "📊 復元後: 合計 $TOTAL_PENDING_NEW 件 / 今日 $TODAY_PENDING_NEW 件"
             fi
           fi
 
