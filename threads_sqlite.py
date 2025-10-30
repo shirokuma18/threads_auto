@@ -470,6 +470,12 @@ def export_to_csv(output_file, status=None):
 def check_and_post():
     """スケジュールをチェックして投稿"""
     global DRY_RUN
+    from datetime import timezone, timedelta
+
+    # 現在時刻を表示
+    jst = timezone(timedelta(hours=9))
+    current_time_jst = datetime.now(jst).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"\n📅 現在時刻（JST）: {current_time_jst}")
 
     posts = get_pending_posts()
 
@@ -477,7 +483,8 @@ def check_and_post():
         print("投稿待ちの項目はありません")
         return
 
-    print(f"\n投稿待ち: {len(posts)}件")
+    print(f"\n✅ 投稿対象: {len(posts)}件")
+    print(f"時刻範囲: {posts[0]['scheduled_at']} 〜 {posts[-1]['scheduled_at']}")
 
     if DRY_RUN:
         print("\n[ドライラン] 以下の投稿が実行されます:\n")
@@ -487,9 +494,9 @@ def check_and_post():
         csv_id = post['csv_id']
         text = post['text']
         scheduled_at = post['scheduled_at']
+        category = post.get('category', '未分類')
 
-        print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id}")
-        print(f"  スケジュール: {scheduled_at}")
+        print(f"\n[{i+1}/{len(posts)}] 投稿ID: {csv_id} | {scheduled_at} | [{category}]")
         print(f"  テキスト: {text[:80]}{'...' if len(text) > 80 else ''}")
 
         if DRY_RUN:
