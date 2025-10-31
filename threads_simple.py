@@ -2,11 +2,11 @@
 """
 Threads シンプル投稿スケジューラ + Daily Report
 
-仕組み:
-1. .last_posted_at から前回実行時刻を読む
-2. posts_schedule.csv から scheduled_at が (last_posted_at, now] の範囲を取得
-3. その範囲の投稿を順番に投稿（一定間隔を空ける）
-4. 投稿完了後、現在時刻を .last_posted_at に保存
+仕組み（新アーキテクチャ）:
+1. 現在時刻から該当するスケジュールターム（8, 12, 15, 18, 21, 23時）を判定
+2. Threads APIから最近の投稿を取得
+3. そのタームの投稿で未投稿のものだけを取得
+4. 投稿実行（リポジトリへの影響なし）
 
 コマンド:
 - python3 threads_simple.py          投稿実行
@@ -14,10 +14,10 @@ Threads シンプル投稿スケジューラ + Daily Report
 - python3 threads_simple.py daily-report  毎朝の成果報告を投稿
 
 メリット:
-- posted_history.csv 不要
-- threads.db 不要
-- CSVから削除不要（すべての投稿がマスターデータとして残る）
+- リポジトリへの影響ゼロ（ファイル書き込みなし）
+- ブランチ分け不要（mainのみ）
 - 冪等性がある（何度実行しても同じ結果）
+- 重複投稿防止（API照合）
 """
 
 import csv
@@ -42,7 +42,7 @@ USER_ID = os.getenv('THREADS_USER_ID')
 JST = timezone(timedelta(hours=9))
 
 # 設定
-LAST_POSTED_FILE = '.last_posted_at'
+SCHEDULE_HOURS = [8, 12, 15, 18, 21, 23]  # スケジュール時刻（JST）
 POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒）
 MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数（24件/日 = 6回 × 4件）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
@@ -52,28 +52,67 @@ if DRY_RUN:
     POST_INTERVAL_SECONDS = 0.1
 
 
-def get_last_posted_at():
-    """前回投稿時刻を取得（JST）"""
-    if not os.path.exists(LAST_POSTED_FILE):
-        # 初回実行時は None を返す（安全策として処理）
-        return None
+def get_current_schedule_hour(now_hour):
+    """現在時刻から該当するスケジュール時刻（ターム）を取得
 
-    with open(LAST_POSTED_FILE, 'r') as f:
-        timestamp_str = f.read().strip()
-        # ISO形式で保存されているので読み込み
-        return datetime.fromisoformat(timestamp_str)
+    GitHub Actionsのcronは最大15分程度ずれるため、ターム管理で対応
+    例：15:15に実行されても15時のタームとして処理
+    """
+    # 23時のターム: 23:00-7:59 (翌朝まで)
+    if now_hour >= 23 or now_hour < 8:
+        return 23
+    # 21時のターム: 21:00-22:59
+    elif now_hour >= 21:
+        return 21
+    # 18時のターム: 18:00-20:59
+    elif now_hour >= 18:
+        return 18
+    # 15時のターム: 15:00-17:59
+    elif now_hour >= 15:
+        return 15
+    # 12時のターム: 12:00-14:59
+    elif now_hour >= 12:
+        return 12
+    # 8時のターム: 8:00-11:59
+    else:
+        return 8
 
 
-def save_last_posted_at(dt):
-    """最新投稿時刻を保存（JST）"""
-    with open(LAST_POSTED_FILE, 'w') as f:
-        # ISO形式で保存
-        f.write(dt.isoformat())
-    print(f"✓ 最終投稿時刻を保存: {dt.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+def get_recent_posts_from_api():
+    """Threads APIから最近の投稿を取得（重複チェック用）"""
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}/threads'
+        params = {
+            'fields': 'id,text,timestamp',
+            'limit': 30,  # 当日分をカバー
+            'access_token': ACCESS_TOKEN
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json().get('data', [])
+    except Exception as e:
+        print(f"⚠️  API投稿取得エラー: {e}")
+        return []
 
 
-def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
-    """投稿すべき投稿を取得（時間範囲ベース、上限あり）"""
+def is_post_already_published(post_text, recent_posts):
+    """指定の投稿が既に投稿済みか確認（テキストの先頭100文字で照合）"""
+    post_preview = post_text[:100].strip()
+
+    for api_post in recent_posts:
+        api_text = api_post.get('text', '').strip()
+        # 先頭100文字が一致すれば同じ投稿と判定
+        if api_text[:100] == post_preview:
+            return True
+
+    return False
+
+
+def get_posts_to_publish(csv_file, target_date, schedule_hour, max_posts=None):
+    """指定日時のスケジュール時刻の未投稿分を取得"""
+    # APIから最近の投稿を取得（ここで1回だけ）
+    recent_posts = get_recent_posts_from_api()
+
     posts = []
 
     with open(csv_file, 'r', encoding='utf-8') as f:
@@ -101,22 +140,10 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
             if subcategory:
                 topics.append(subcategory)
 
-            # 時間範囲チェック（これだけで十分）
-            if after_time is None:
-                # 初回実行時: before_time 以前
-                # （初回は投稿しないので、ここには到達しない）
-                if scheduled_at <= before_time:
-                    posts.append({
-                        'csv_id': csv_id,
-                        'scheduled_at': scheduled_at,
-                        'text': text,
-                        'thread_text': thread_text,
-                        'topics': topics
-                    })
-            else:
-                # 通常実行: (after_time, before_time] の範囲
-                # scheduled_at <= before_time で自動的に過去を含む
-                if after_time < scheduled_at <= before_time:
+            # 今日の日付 & そのスケジュール時刻の投稿のみ
+            if scheduled_at.date() == target_date and scheduled_at.hour == schedule_hour:
+                # 既に投稿済みかチェック
+                if not is_post_already_published(text, recent_posts):
                     posts.append({
                         'csv_id': csv_id,
                         'scheduled_at': scheduled_at,
@@ -222,31 +249,17 @@ def main():
     now = datetime.now(JST)
     print(f"\n現在時刻: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    # 前回投稿時刻を取得
-    last_posted_at = get_last_posted_at()
-
-    # 初回実行の安全策
-    if last_posted_at is None:
-        print(f"前回実行: なし（初回実行）")
-        print("\n⚠️  初回実行のため、過去の投稿をスキップします")
-        print("現在時刻を保存して終了します...")
-        if not DRY_RUN:
-            save_last_posted_at(now)
-        print("\n✅ 次回実行から通常の投稿が開始されます")
-        return
-
-    print(f"前回実行: {last_posted_at.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+    # 該当するスケジュール時刻を取得
+    schedule_hour = get_current_schedule_hour(now.hour)
+    print(f"該当スケジュール: {schedule_hour}:00 のターム")
 
     # 投稿すべき投稿を取得（スパム対策: 最大4件）
-    posts_to_publish = get_posts_to_publish('posts_schedule.csv', last_posted_at, now, max_posts=MAX_POSTS_PER_RUN)
+    posts_to_publish = get_posts_to_publish('posts_schedule.csv', now.date(), schedule_hour, max_posts=MAX_POSTS_PER_RUN)
 
     print(f"\n📊 投稿対象: {len(posts_to_publish)} 件")
 
     if not posts_to_publish:
-        print("\n✓ 投稿する投稿がありません")
-        # 実行時刻だけ更新
-        if not DRY_RUN:
-            save_last_posted_at(now)
+        print("\n✓ 投稿する投稿がありません（全て投稿済み or 該当なし）")
         return
 
     # 投稿リストを表示
@@ -299,12 +312,6 @@ def main():
     print("=" * 70)
     print(f"成功: {success_count} 件")
     print(f"失敗: {fail_count} 件")
-
-    # 最終投稿時刻を保存
-    if not DRY_RUN:
-        save_last_posted_at(now)
-    else:
-        print(f"\n[ドライラン] 最終投稿時刻の保存をスキップ: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     print("\n✅ 処理完了")
 
 
