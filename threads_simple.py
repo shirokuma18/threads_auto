@@ -84,6 +84,8 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
             datetime_str = row.get('datetime', '').strip()
             text = row.get('text', '').strip()
             thread_text = row.get('thread_text', '').strip() or None
+            category = row.get('category', '').strip()
+            subcategory = row.get('subcategory', '').strip()
 
             if not csv_id or not datetime_str or not text:
                 continue
@@ -91,6 +93,13 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
             # scheduled_at をパース（タイムゾーン情報なし = JST として扱う）
             scheduled_at = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
             scheduled_at = scheduled_at.replace(tzinfo=JST)
+
+            # トピックリストを構築
+            topics = []
+            if category:
+                topics.append(category)
+            if subcategory:
+                topics.append(subcategory)
 
             # 時間範囲チェック（これだけで十分）
             if after_time is None:
@@ -101,7 +110,8 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
                         'csv_id': csv_id,
                         'scheduled_at': scheduled_at,
                         'text': text,
-                        'thread_text': thread_text
+                        'thread_text': thread_text,
+                        'topics': topics
                     })
             else:
                 # 通常実行: (after_time, before_time] の範囲
@@ -111,7 +121,8 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
                         'csv_id': csv_id,
                         'scheduled_at': scheduled_at,
                         'text': text,
-                        'thread_text': thread_text
+                        'thread_text': thread_text,
+                        'topics': topics
                     })
 
     # 予定時刻順にソート
@@ -125,14 +136,15 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
     return posts
 
 
-def create_threads_post(text, reply_to_id=None):
+def create_threads_post(text, reply_to_id=None, topics=None):
     """Threads APIで投稿を作成"""
     # ドライランモード
     if DRY_RUN:
         if reply_to_id:
             print(f"  → [ドライラン] スレッド投稿をシミュレート中... (返信先: {reply_to_id})")
         else:
-            print(f"  → [ドライラン] 投稿をシミュレート中...")
+            topic_info = f" トピック: {', '.join(topics)}" if topics else ""
+            print(f"  → [ドライラン] 投稿をシミュレート中...{topic_info}")
         time.sleep(0.1)
         fake_post_id = f"dry_run_{int(time.time())}"
         print(f"  ✓ [ドライラン] 投稿成功（シミュレート）！ (ID: {fake_post_id})")
@@ -147,11 +159,17 @@ def create_threads_post(text, reply_to_id=None):
             'text': text
         }
 
+        # トピックを追加（空でない場合）
+        if topics and len(topics) > 0:
+            # Threads APIは複数のトピックをサポート（最大5つ）
+            create_data['topics'] = topics[:5]
+
         if reply_to_id:
             create_data['reply_to_id'] = reply_to_id
             print(f"  → スレッドコンテナ作成中... (返信先: {reply_to_id})")
         else:
-            print(f"  → コンテナ作成中...")
+            topic_info = f" [トピック: {', '.join(topics)}]" if topics else ""
+            print(f"  → コンテナ作成中...{topic_info}")
 
         create_response = requests.post(create_url, params=create_params, data=create_data)
         create_response.raise_for_status()
@@ -235,7 +253,8 @@ def main():
     print("\n投稿予定:")
     for i, post in enumerate(posts_to_publish, 1):
         preview = post['text'][:50].replace('\n', ' ')
-        print(f"  {i}. [{post['csv_id']}] {post['scheduled_at'].strftime('%Y-%m-%d %H:%M')} - {preview}...")
+        topic_info = f" [トピック: {', '.join(post['topics'])}]" if post.get('topics') else ""
+        print(f"  {i}. [{post['csv_id']}] {post['scheduled_at'].strftime('%Y-%m-%d %H:%M')}{topic_info} - {preview}...")
 
     print("\n" + "=" * 70)
     print("📤 投稿を開始します")
@@ -249,9 +268,11 @@ def main():
         print(f"\n[{i}/{len(posts_to_publish)}] ID: {post['csv_id']}")
         print(f"予定時刻: {post['scheduled_at'].strftime('%Y-%m-%d %H:%M')}")
         print(f"本文: {post['text'][:100]}...")
+        if post.get('topics'):
+            print(f"トピック: {', '.join(post['topics'])}")
 
         # メイン投稿
-        threads_post_id = create_threads_post(post['text'])
+        threads_post_id = create_threads_post(post['text'], topics=post.get('topics'))
 
         if threads_post_id:
             # スレッド投稿がある場合
