@@ -133,7 +133,8 @@ python3 setup_long_lived_token.py
 
 ## 📚 ドキュメント
 
-- [POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md) - 投稿作成の完全マニュアル
+- **[POSTING_GUIDELINES.md](POSTING_GUIDELINES.md)** - 投稿作成ガイドライン（短文・高頻度投稿版、必読）
+- [POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md) - 投稿作成の完全マニュアル（長文投稿向け）
 - [learnings.md](learnings.md) - 仮説検証ログ
 - [.claude/claude.md](.claude/claude.md) - Claude Code セッションガイド
 
