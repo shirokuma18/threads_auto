@@ -42,9 +42,9 @@ USER_ID = os.getenv('THREADS_USER_ID')
 JST = timezone(timedelta(hours=9))
 
 # 設定
-SCHEDULE_HOURS = [8, 12, 15, 18, 20, 21, 23]  # スケジュール時刻（JST）
-POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒）
-MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数
+SCHEDULE_HOURS = [8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24]  # スケジュール時刻（JST）
+POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒、6分）
+MAX_POSTS_PER_RUN = 5  # 1回の実行での最大投稿数（12枠 × 5投稿 = 60投稿/日）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 
 # ドライランモード時は間隔を短縮
@@ -56,27 +56,39 @@ def get_current_schedule_hour(now_hour):
     """現在時刻から該当するスケジュール時刻（ターム）を取得
 
     GitHub Actionsのcronは最大15分程度ずれるため、ターム管理で対応
-    例：15:15に実行されても15時のタームとして処理
+    新スケジュール: 8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24(0)時
     """
-    # 23時のターム: 23:00-7:59 (翌朝まで)
-    if now_hour >= 23 or now_hour < 8:
+    # 24時(0時)のターム: 0:00-7:59 (深夜～早朝)
+    if now_hour >= 0 and now_hour < 8:
+        return 24  # 24時として扱う（CSVでは24:00と記録）
+    # 23時のターム: 23:00-23:59
+    elif now_hour >= 23:
         return 23
-    # 21時のターム: 21:00-22:59
+    # 22時のターム: 22:00-22:59
+    elif now_hour >= 22:
+        return 22
+    # 21時のターム: 21:00-21:59
     elif now_hour >= 21:
         return 21
     # 20時のターム: 20:00-20:59
     elif now_hour >= 20:
         return 20
-    # 18時のターム: 18:00-19:59
-    elif now_hour >= 18:
-        return 18
-    # 15時のターム: 15:00-17:59
+    # 19時のターム: 19:00-19:59
+    elif now_hour >= 19:
+        return 19
+    # 17時のターム: 17:00-18:59
+    elif now_hour >= 17:
+        return 17
+    # 15時のターム: 15:00-16:59
     elif now_hour >= 15:
         return 15
     # 12時のターム: 12:00-14:59
     elif now_hour >= 12:
         return 12
-    # 8時のターム: 8:00-11:59
+    # 10時のターム: 10:00-11:59
+    elif now_hour >= 10:
+        return 10
+    # 8時のターム: 8:00-9:59
     else:
         return 8
 
