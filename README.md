@@ -7,10 +7,11 @@ Threadsへの自動投稿システム（シンプル設計）
 **完全ステートレス = 究極のシンプルさ**
 
 - 単一の情報源: `posts_schedule.csv`
-- タームベースの投稿判定（8, 12, 15, 18, 21, 23時）
+- タームベースの投稿判定（8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24時）
 - API照合による重複防止
 - リポジトリへの影響ゼロ（ファイル書き込みなし）
 - ブランチ分け不要（mainのみ）
+- **スレッド形式投稿対応**（各ターム2/5投稿）
 
 ## 📁 プロジェクト構造
 
@@ -54,10 +55,11 @@ id,datetime,text,category,topic,thread_text
 
 GitHub Actionsで自動実行：
 
-- **投稿**: 8:00, 12:00, 15:00, 18:00, 21:00, 23:00 JST（毎日6回、各4投稿 = 24投稿/日）
+- **投稿**: 8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24時 JST（毎日11回、各5投稿 = 55投稿/日）
 - **成果報告**: 9:00 JST（毎朝）
 
 **投稿間隔:** 6分（スパム対策）
+**スレッド形式:** 各ターム2/5投稿（続きがスレッド内に展開）
 
 ## 🎨 投稿戦略
 
@@ -140,9 +142,40 @@ THREADS_USER_ID=your_user_id_here
 python3 setup_long_lived_token.py
 ```
 
+## 📊 競合分析・投稿戦略
+
+### Threads API 競合分析ツール
+
+実際のThreads APIを使った競合分析・投稿戦略の立案ツールを追加しました。
+
+**利用可能な機能:**
+- **キーワード検索API** - トレンドキーワードで投稿を検索
+- **トレンド分析** - 投稿頻度、文字数、メディアタイプの分析
+- **コンテンツパターン分析** - 疑問形、絵文字、ハッシュタグの使用率
+- **投稿戦略の自動生成** - データに基づいた最適な投稿戦略
+
+### 使い方
+
+```bash
+# 競合分析の実行
+python3 threads_competitor_analyzer.py
+
+# 生成されるファイル:
+# - threads_keyword_trends.csv       # キーワード別トレンド
+# - threads_popular_{keyword}.csv    # 人気投稿リスト
+# - threads_posting_strategy.csv     # 推奨投稿戦略
+```
+
+**詳細:** [COMPETITOR_ANALYSIS_GUIDE.md](COMPETITOR_ANALYSIS_GUIDE.md)
+
+**API制限:**
+- キーワード検索: 7日間で500クエリ
+- データ期間: 2024年4月13日以降
+
 ## 📚 ドキュメント
 
 - **[POSTING_GUIDELINES.md](POSTING_GUIDELINES.md)** - 投稿作成ガイドライン（短文・高頻度投稿版、必読）
+- **[COMPETITOR_ANALYSIS_GUIDE.md](COMPETITOR_ANALYSIS_GUIDE.md)** - 競合分析・投稿戦略ガイド
 - [POST_CREATION_MANUAL.md](POST_CREATION_MANUAL.md) - 投稿作成の完全マニュアル（長文投稿向け）
 - [learnings.md](learnings.md) - 仮説検証ログ
 - [.claude/claude.md](.claude/claude.md) - Claude Code セッションガイド
