@@ -43,7 +43,7 @@ JST = timezone(timedelta(hours=9))
 
 # 設定
 LAST_POSTED_FILE = '.last_posted_at'
-POST_INTERVAL_SECONDS = 60  # 投稿間隔（秒）
+POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒）
 MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数（スパム対策）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 
