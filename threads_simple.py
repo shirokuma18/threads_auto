@@ -187,9 +187,9 @@ def create_threads_post(text, reply_to_id=None, topics=None):
         }
 
         # トピックを追加（空でない場合）
+        # Threads APIは1つのトピックのみサポート（topic_tag）
         if topics and len(topics) > 0:
-            # Threads APIは複数のトピックをサポート（最大5つ）
-            create_data['topics'] = topics[:5]
+            create_data['topic_tag'] = topics[0]  # 最初のトピックのみ使用
 
         if reply_to_id:
             create_data['reply_to_id'] = reply_to_id
