@@ -9,6 +9,9 @@ on:
     - cron: '0 9 * * *'   # 18:00 JST
     - cron: '0 12 * * *'  # 21:00 JST
 
+    # テスト実行（2025-10-31 13:45 JST = 4:45 UTC）
+    - cron: '45 4 * * *'  # 13:45 JST
+
   # 手動実行
   workflow_dispatch:
 
