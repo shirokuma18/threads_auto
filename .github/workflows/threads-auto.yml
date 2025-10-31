@@ -1,0 +1,114 @@
+name: Threads Auto Posting
+
+on:
+  # 投稿スケジュール（定期実行）
+  schedule:
+    # 毎日 8:00, 12:00, 18:00, 21:00 JST (UTC: 23:00, 3:00, 9:00, 12:00)
+    - cron: '0 23 * * *'  # 8:00 JST
+    - cron: '0 3 * * *'   # 12:00 JST
+    - cron: '0 9 * * *'   # 18:00 JST
+    - cron: '0 12 * * *'  # 21:00 JST
+
+  # 手動実行
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト (automation ブランチ)
+        uses: actions/checkout@v3
+        with:
+          ref: automation
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: Git設定
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: シンプル投稿スクリプトを実行
+        run: python3 threads_simple.py
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+
+      - name: 最終実行時刻をコミット
+        if: always()
+        run: |
+          if [ -f .last_posted_at ]; then
+            git add .last_posted_at
+
+            if ! git diff --quiet HEAD .last_posted_at 2>/dev/null; then
+              LAST_TIME=$(cat .last_posted_at)
+              git commit -m "Update: Last posted at $LAST_TIME [auto]"
+              git push origin automation
+              echo "✅ 最終実行時刻を automation ブランチに保存しました"
+            else
+              echo "📝 変更がないため、コミットをスキップします"
+            fi
+          else
+            echo "⚠️  .last_posted_at ファイルが見つかりません"
+          fi
+
+  # 毎朝のレポート投稿（毎日9時 JST）
+  daily-report:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 0 * * *'  # 9:00 JST (0:00 UTC)
+
+    steps:
+      - name: リポジトリをチェックアウト (main ブランチ)
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: Daily Reportを生成・投稿
+        run: python3 threads_simple.py daily-report
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+
+  # Merge automation → main（毎日0時 JST）
+  merge-to-main:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 15 * * *'
+    needs: post
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: automation ブランチをマージ
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git fetch origin automation
+          git merge origin/automation -m "Merge automation updates to main [auto]"
+          git push origin main

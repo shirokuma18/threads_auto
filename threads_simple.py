@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Threads シンプル投稿スケジューラ
+Threads シンプル投稿スケジューラ + Daily Report
 
 仕組み:
 1. .last_posted_at から前回実行時刻を読む
 2. posts_schedule.csv から scheduled_at が (last_posted_at, now] の範囲を取得
 3. その範囲の投稿を順番に投稿（一定間隔を空ける）
 4. 投稿完了後、現在時刻を .last_posted_at に保存
+
+コマンド:
+- python3 threads_simple.py          投稿実行
+- python3 threads_simple.py --dry-run  ドライラン
+- python3 threads_simple.py daily-report  毎朝の成果報告を投稿
 
 メリット:
 - posted_history.csv 不要
@@ -21,6 +26,7 @@ import requests
 import json
 import os
 import sys
+import random
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
@@ -249,5 +255,166 @@ def main():
     print("\n✅ 処理完了")
 
 
+def get_user_posts():
+    """ユーザーの投稿一覧を取得"""
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}/threads'
+        params = {
+            'fields': 'id,text,timestamp,permalink',
+            'limit': 100,
+            'access_token': ACCESS_TOKEN
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        return response.json().get('data', [])
+    except Exception as e:
+        print(f"✗ 投稿一覧取得エラー: {e}")
+        return []
+
+
+def get_post_insights(post_id):
+    """投稿のインサイトを取得"""
+    try:
+        url = f'{API_BASE_URL}/{post_id}/insights'
+        params = {
+            'metric': 'views,likes,replies,reposts,quotes',
+            'access_token': ACCESS_TOKEN
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+
+        data = response.json().get('data', [])
+        insights = {}
+        for item in data:
+            metric_name = item.get('name')
+            value = item.get('values', [{}])[0].get('value', 0)
+            insights[metric_name] = value
+
+        return insights
+    except Exception as e:
+        return {'views': 0, 'likes': 0, 'replies': 0, 'reposts': 0, 'quotes': 0}
+
+
+def get_followers_count():
+    """フォロワー数を取得"""
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}/threads_insights'
+        params = {
+            'metric': 'followers_count',
+            'access_token': ACCESS_TOKEN
+        }
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+
+        data = response.json().get('data', [])
+        for item in data:
+            if item.get('name') == 'followers_count':
+                return item.get('values', [{}])[0].get('value', 0)
+        return 0
+    except Exception as e:
+        print(f"✗ フォロワー数取得エラー: {e}")
+        return 0
+
+
+def generate_daily_report():
+    """毎朝の成果報告を生成・投稿"""
+    print("=" * 70)
+    print("📊 Daily Report Generator")
+    print("=" * 70)
+
+    # 運用開始日
+    start_date = datetime(2025, 10, 29, tzinfo=JST)
+    today = datetime.now(JST)
+    days_running = (today - start_date).days
+
+    print(f"\n運用開始日: {start_date.strftime('%Y-%m-%d')}")
+    print(f"経過日数: {days_running}日")
+
+    # 昨日のデータを取得
+    yesterday = today - timedelta(days=1)
+    yesterday_start = yesterday.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_end = yesterday.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+    print(f"\n昨日の範囲: {yesterday_start.strftime('%Y-%m-%d %H:%M')} - {yesterday_end.strftime('%Y-%m-%d %H:%M')}")
+
+    # 投稿一覧を取得
+    posts = get_user_posts()
+
+    # 昨日の投稿を抽出
+    yesterday_posts = []
+    for post in posts:
+        timestamp_str = post.get('timestamp', '')
+        if timestamp_str:
+            # ISO 8601形式をパース
+            post_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            post_time_jst = post_time.astimezone(JST)
+
+            if yesterday_start <= post_time_jst <= yesterday_end:
+                yesterday_posts.append(post)
+
+    print(f"昨日の投稿数: {len(yesterday_posts)}件")
+
+    # インサイト集計
+    total_views = 0
+    total_likes = 0
+
+    for post in yesterday_posts:
+        post_id = post.get('id')
+        insights = get_post_insights(post_id)
+        total_views += insights.get('views', 0)
+        total_likes += insights.get('likes', 0)
+
+    avg_likes = total_likes / len(yesterday_posts) if yesterday_posts else 0
+
+    # フォロワー数
+    followers_count = get_followers_count()
+
+    print(f"\n📊 集計結果:")
+    print(f"  投稿数: {len(yesterday_posts)}投稿")
+    print(f"  いいね: {total_likes}件（平均{avg_likes:.1f}）")
+    print(f"  インプレッション: {total_views:,}回")
+    print(f"  フォロワー: {followers_count}人")
+
+    # モチベーションメッセージ
+    motivation_messages = [
+        "継続は力なり。今日も頑張ろう！",
+        "小さな積み重ねが大きな成果に。",
+        "毎日コツコツ、着実に成長中！",
+        "焦らず、自分のペースで。",
+        "今日も楽しく発信していこう！"
+    ]
+    motivation = random.choice(motivation_messages)
+
+    # レポート本文を生成
+    report_text = f"""おはよう☀️
+運用開始して{days_running}日目の成果報告！
+
+【投稿数】{len(yesterday_posts)}投稿
+【いいね】{total_likes}件（平均{avg_likes:.1f}）
+【インプレッション】{total_views:,}回
+【フォロワー】{followers_count}人
+
+{motivation}"""
+
+    print(f"\n📝 レポート本文:")
+    print(report_text)
+    print()
+
+    # 投稿
+    if DRY_RUN:
+        print("[ドライラン] 実際には投稿されません")
+    else:
+        print("📤 レポートを投稿中...")
+        post_id = create_threads_post(report_text)
+        if post_id:
+            print(f"✅ レポート投稿成功！ (ID: {post_id})")
+        else:
+            print("✗ レポート投稿失敗")
+
+
 if __name__ == '__main__':
-    main()
+    # コマンドライン引数チェック
+    if len(sys.argv) > 1 and sys.argv[1] == 'daily-report':
+        generate_daily_report()
+    else:
+        main()
