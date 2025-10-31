@@ -15,6 +15,10 @@ import sys
 import re
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+from dotenv import load_dotenv
+
+# .envファイルを読み込む（既存の環境変数を上書き）
+load_dotenv(override=True)
 
 
 # ============================================
@@ -34,6 +38,12 @@ MIN_INTERVAL_SECONDS = 10  # 10秒（予備的な待機時間）
 
 # ドライランモード
 DRY_RUN = False
+
+# 投稿後にレコードを削除するか（デフォルト: True で削除）
+DELETE_AFTER_POST = os.getenv('DELETE_AFTER_POST', 'true').lower() == 'true'
+
+# 運用開始日（この日を1日目として日数をカウント）
+OPERATION_START_DATE = '2025-10-29'
 
 # ============================================
 # Threads API
@@ -149,6 +159,180 @@ def create_threads_post(text, reply_to_id=None):
         return None
 
 
+def get_user_profile():
+    """ユーザープロフィール情報を取得（フォロワー数など）"""
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}'
+        params = {
+            'fields': 'id,username,threads_profile_picture_url,threads_biography',
+            'access_token': ACCESS_TOKEN
+        }
+
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        # フォロワー数を取得
+        threads_url = f'{API_BASE_URL}/{USER_ID}/threads'
+        threads_params = {
+            'fields': 'id',
+            'limit': 1,
+            'access_token': ACCESS_TOKEN
+        }
+        threads_response = requests.get(threads_url, params=threads_params)
+
+        # Note: Threads APIではフォロワー数の直接取得ができないため、
+        # 代わりに最近の投稿のエンゲージメントから推定します
+
+        return {
+            'username': data.get('username', ''),
+            'user_id': data.get('id', ''),
+        }
+
+    except requests.exceptions.RequestException as e:
+        print(f"  ✗ プロフィール取得エラー: {e}")
+        return None
+
+
+def get_followers_count():
+    """Threads Insights APIからフォロワー数を取得"""
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}/threads_insights'
+        params = {
+            'metric': 'followers_count',
+            'access_token': ACCESS_TOKEN
+        }
+
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if 'data' in data and len(data['data']) > 0:
+            followers = data['data'][0]['total_value']['value']
+            return followers
+        return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"  ✗ フォロワー数取得エラー: {e}")
+        return None
+
+
+def save_daily_stats(date_str, followers_count, posts_count, total_likes, total_impressions):
+    """日次統計をデータベースに保存"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO daily_stats
+            (date, followers_count, posts_count, total_likes, total_impressions)
+            VALUES (?, ?, ?, ?, ?)
+        """, (date_str, followers_count, posts_count, total_likes, total_impressions))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"  ✗ 日次統計保存エラー: {e}")
+        return False
+
+
+def get_previous_day_stats(date_str):
+    """指定日の統計を取得"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT followers_count, posts_count, total_likes, total_impressions
+            FROM daily_stats
+            WHERE date = ?
+        """, (date_str,))
+        result = cursor.fetchone()
+        conn.close()
+
+        if result:
+            return {
+                'followers_count': result[0],
+                'posts_count': result[1],
+                'total_likes': result[2],
+                'total_impressions': result[3]
+            }
+        return None
+    except Exception as e:
+        print(f"  ✗ 前日統計取得エラー: {e}")
+        return None
+
+
+def get_yesterday_posts_summary():
+    """前日の投稿サマリーを取得"""
+    # 日本時間（JST = UTC+9）で前日の範囲を取得
+    from datetime import timezone, timedelta
+    jst = timezone(timedelta(hours=9))
+    today = datetime.now(jst).replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = (today - timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S')
+    yesterday_end = today.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Threads APIから最近の投稿を取得（前日分を確実に取得するため多めに取得）
+    try:
+        url = f'{API_BASE_URL}/{USER_ID}/threads'
+        params = {
+            'fields': 'id,text,timestamp',
+            'limit': 100,  # 前日の投稿を確実に取得するため100件に設定
+            'access_token': ACCESS_TOKEN
+        }
+
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        threads_data = response.json().get('data', [])
+
+        print(f"  → APIから{len(threads_data)}件の投稿を取得")
+
+        # 前日の投稿をフィルター
+        yesterday_posts = []
+        for post in threads_data:
+            # タイムスタンプをパース（ISO 8601形式）
+            timestamp_str = post.get('timestamp', '')
+            if timestamp_str:
+                # 'Z'を'+00:00'に置換してパース
+                post_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                post_time_jst = post_time.astimezone(jst)
+
+                post_time_str = post_time_jst.strftime('%Y-%m-%d %H:%M:%S')
+
+                if yesterday_start <= post_time_str < yesterday_end:
+                    yesterday_posts.append(post)
+                    print(f"  → 前日の投稿を発見: {post['id']} ({post_time_str})")
+
+        print(f"  → 前日の投稿: {len(yesterday_posts)}件")
+
+        # 各投稿の詳細データを取得
+        total_likes = 0
+        total_views = 0
+
+        for i, post in enumerate(yesterday_posts, 1):
+            print(f"  → [{i}/{len(yesterday_posts)}] 投稿 {post['id']} の分析データ取得中...")
+            insights = get_post_insights(post['id'])
+            if insights:
+                total_likes += insights['likes']
+                total_views += insights['views']
+                print(f"     いいね: {insights['likes']}, 表示: {insights['views']}")
+            time.sleep(2)  # レート制限対策
+
+        return {
+            'post_count': len(yesterday_posts),
+            'total_likes': total_likes,
+            'total_views': total_views,
+        }
+
+    except Exception as e:
+        print(f"  ✗ 前日投稿サマリー取得エラー: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                print(f"  ✗ エラー詳細: {json.dumps(error_detail, indent=2, ensure_ascii=False)}")
+            except:
+                print(f"  ✗ レスポンス: {e.response.text[:500]}")
+        return None
+
+
 def get_post_insights(threads_post_id):
     """投稿の分析データを取得"""
     try:
@@ -256,10 +440,30 @@ def get_pending_posts():
     return [dict(row) for row in posts]
 
 
-def mark_as_posted(post_id, threads_post_id):
+def save_to_posted_history(csv_id, posted_at):
+    """投稿履歴を posted_history.csv に追記"""
+    history_file = 'posted_history.csv'
+
+    # ファイルが存在しない場合はヘッダーを作成
+    file_exists = os.path.exists(history_file)
+
+    try:
+        with open(history_file, 'a', encoding='utf-8', newline='') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['csv_id', 'posted_at'])
+            writer.writerow([csv_id, posted_at])
+        print(f"  ✓ posted_history.csv に記録しました (csv_id: {csv_id})")
+    except Exception as e:
+        print(f"  ⚠️  posted_history.csv への書き込みエラー: {e}")
+
+
+def mark_as_posted(post_id, threads_post_id, csv_id=None):
     """投稿を投稿済みとしてマーク"""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    posted_at = datetime.now()
 
     cursor.execute("""
         UPDATE posts
@@ -268,10 +472,14 @@ def mark_as_posted(post_id, threads_post_id):
             posted_at = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-    """, (threads_post_id, datetime.now(), post_id))
+    """, (threads_post_id, posted_at, post_id))
 
     conn.commit()
     conn.close()
+
+    # posted_history.csv に追記
+    if csv_id:
+        save_to_posted_history(csv_id, posted_at)
 
 
 def mark_as_failed(post_id, error_message):
@@ -558,6 +766,259 @@ def load_posted_history():
     return posted_ids
 
 
+def check_text_duplicate(text):
+    """同じテキストが既に投稿されていないかチェック"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # データベース内で同じテキストの投稿済みレコードを検索
+    cursor.execute("""
+        SELECT csv_id, posted_at
+        FROM posts
+        WHERE status = 'posted'
+          AND text = ?
+        LIMIT 1
+    """, (text,))
+
+    result = cursor.fetchone()
+    conn.close()
+
+    if result:
+        return {
+            'is_duplicate': True,
+            'csv_id': result['csv_id'],
+            'posted_at': result['posted_at']
+        }
+
+    return {'is_duplicate': False}
+
+
+def delete_posted_record(post_id):
+    """投稿済みレコードをデータベースから削除"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("DELETE FROM posts WHERE id = ?", (post_id,))
+
+    conn.commit()
+    conn.close()
+    print(f"  ✓ レコードをデータベースから削除しました (ID: {post_id})")
+
+
+def generate_daily_report_text(summary):
+    """前日のレポート投稿テキストを生成"""
+    import random
+    from datetime import timezone, timedelta
+
+    post_count = summary['post_count']
+    total_likes = summary['total_likes']
+    total_views = summary['total_views']
+    followers_count = summary.get('followers_count')
+    followers_diff = summary.get('followers_diff')
+
+    # 運用日数を計算
+    jst = timezone(timedelta(hours=9))
+    today = datetime.now(jst)
+    start_date = datetime.strptime(OPERATION_START_DATE, '%Y-%m-%d').replace(tzinfo=jst)
+    days_since_start = (today.date() - start_date.date()).days + 1  # 開始日を1日目とする
+
+    # 成果に応じて前向きなメッセージを変える
+    if total_likes >= 100:
+        motivation = random.choice([
+            "いい感じ！この調子で頑張るぞ！",
+            "順調！今日も楽しく発信していこう✨",
+            "嬉しい！もっと伸ばしていくぞ！",
+            "最高！今日も頑張ろう💪"
+        ])
+    elif total_likes >= 50:
+        motivation = random.choice([
+            "少しずつ伸びてる！今日も頑張るぞ！",
+            "いい感じ！継続が力になってきた✨",
+            "着実に成長中！今日も楽しく発信しよう！",
+            "手応えあり！もっと頑張ろう💪"
+        ])
+    elif total_likes >= 20:
+        motivation = random.choice([
+            "まだまだこれから！もっと頑張るぞ！",
+            "少しずつ前進！今日も続けよう✨",
+            "成長中！継続あるのみ💪",
+            "諦めない！今日も頑張るぞ！"
+        ])
+    else:
+        motivation = random.choice([
+            "これから！もっともっと頑張るぞ！",
+            "まだまだ！今日も全力で発信しよう💪",
+            "負けない！継続して伸ばしていくぞ✨",
+            "まだ始まったばかり！今日も頑張る！"
+        ])
+
+    # 平均いいね数を計算
+    avg_likes = total_likes / post_count if post_count > 0 else 0
+
+    # フォロワー数の行を作成
+    followers_line = ""
+    if followers_count is not None:
+        if followers_diff is not None and followers_diff != 0:
+            if followers_diff > 0:
+                followers_line = f"【フォロワー】{followers_count}人（前日比+{followers_diff}人👆）\n"
+            else:
+                followers_line = f"【フォロワー】{followers_count}人（前日比{followers_diff}人）\n"
+        else:
+            followers_line = f"【フォロワー】{followers_count}人\n"
+
+    report_text = f"""おはよう☀️
+運用開始して{days_since_start}日目の成果報告！
+
+【投稿数】{post_count}投稿
+【いいね】{total_likes}いいね（平均{avg_likes:.1f}）
+【インプレッション】{total_views:,}回
+{followers_line}{motivation}"""
+
+    return report_text
+
+
+def create_daily_report():
+    """毎朝のレポート投稿を作成"""
+    global DRY_RUN
+    from datetime import timezone, timedelta
+
+    print("\n" + "="*70)
+    print("📊 毎朝のレポート投稿")
+    print("="*70)
+
+    # 前日の投稿サマリーを取得
+    print("\n前日の投稿データを取得中...")
+    summary = get_yesterday_posts_summary()
+
+    if not summary:
+        print("⚠️  前日のデータを取得できませんでした")
+        return
+
+    if summary['post_count'] == 0:
+        print("⚠️  前日の投稿がありません")
+        return
+
+    # 現在のフォロワー数を取得
+    print("\nフォロワー数を取得中...")
+    current_followers = get_followers_count()
+
+    if current_followers is not None:
+        print(f"  → 現在のフォロワー数: {current_followers}人")
+        summary['followers_count'] = current_followers
+
+        # 前日（2日前）の統計を取得して比較
+        jst = timezone(timedelta(hours=9))
+        yesterday = datetime.now(jst) - timedelta(days=1)
+        yesterday_str = yesterday.strftime('%Y-%m-%d')
+
+        prev_stats = get_previous_day_stats(yesterday_str)
+
+        if prev_stats and prev_stats['followers_count'] is not None:
+            followers_diff = current_followers - prev_stats['followers_count']
+            summary['followers_diff'] = followers_diff
+            print(f"  → 前日比: {'+' if followers_diff >= 0 else ''}{followers_diff}人")
+        else:
+            summary['followers_diff'] = None
+            print(f"  → 前日のデータなし（初回記録）")
+
+        # 本日の統計を保存
+        today = datetime.now(jst)
+        today_str = today.strftime('%Y-%m-%d')
+        save_daily_stats(
+            today_str,
+            current_followers,
+            summary['post_count'],
+            summary['total_likes'],
+            summary['total_views']
+        )
+        print(f"  ✓ 本日の統計を保存しました")
+    else:
+        print("  ⚠️  フォロワー数を取得できませんでした")
+        summary['followers_count'] = None
+        summary['followers_diff'] = None
+
+    # レポートテキストを生成
+    report_text = generate_daily_report_text(summary)
+
+    print(f"\n生成されたレポート:\n{report_text}\n")
+
+    if DRY_RUN:
+        print("[ドライラン] 実際には投稿されません")
+        return
+
+    # レポートを投稿
+    print("レポートを投稿中...")
+    threads_post_id = create_threads_post(report_text)
+
+    if threads_post_id:
+        print(f"✅ レポート投稿完了！")
+    else:
+        print(f"✗ レポート投稿に失敗しました")
+
+
+def update_learnings(entry_text):
+    """学習ログを更新"""
+    from datetime import timezone, timedelta
+
+    learnings_file = 'learnings.md'
+    jst = timezone(timedelta(hours=9))
+    today = datetime.now(jst).strftime('%Y-%m-%d')
+
+    # 新しいエントリー
+    new_entry = f"""## {today}
+
+### 📊 検証データ
+[手動で追記]
+
+### 💡 仮説
+{entry_text}
+
+### ✅/❌ 結果
+[結果を記入]
+
+### 🎯 改善アクション
+[次のアクションを記入]
+
+---
+
+"""
+
+    try:
+        # 既存ファイルを読み込み
+        if os.path.exists(learnings_file):
+            with open(learnings_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            # 最初の "---" の後に新しいエントリーを挿入
+            if '---\n\n## ' in content:
+                parts = content.split('---\n\n## ', 1)
+                updated_content = parts[0] + '---\n\n' + new_entry + '## ' + parts[1]
+            else:
+                # フォーマットが違う場合は最後に追加
+                updated_content = content + '\n' + new_entry
+        else:
+            # ファイルがない場合は新規作成
+            updated_content = f"""# Threads運用 学習ログ
+
+> 仮説検証と改善の記録。最新30日分を保持。
+
+---
+
+{new_entry}"""
+
+        # ファイルに書き込み
+        with open(learnings_file, 'w', encoding='utf-8') as f:
+            f.write(updated_content)
+
+        print(f"✅ 学習ログを更新しました: {learnings_file}")
+        print(f"   日付: {today}")
+        return True
+
+    except Exception as e:
+        print(f"✗ 学習ログ更新エラー: {e}")
+        return False
+
+
 def check_and_post():
     """スケジュールをチェックして投稿"""
     global DRY_RUN
@@ -619,10 +1080,20 @@ def check_and_post():
         if thread_text:
             print(f"  スレッド: あり（{len(thread_text)}文字）")
 
-        # 重複チェック
+        # 重複チェック1: posted_history.csv
         if csv_id in posted_ids:
             print(f"  ⚠️  すでに投稿済み（posted_history.csvに記録あり）")
-            mark_as_posted(post_id, f"duplicate_{csv_id}")
+            print(f"  → スキップして、レコードを削除します")
+            delete_posted_record(post_id)
+            continue
+
+        # 重複チェック2: テキスト内容
+        duplicate_check = check_text_duplicate(text)
+        if duplicate_check['is_duplicate']:
+            print(f"  ⚠️  同じ内容が既に投稿済みです")
+            print(f"     過去の投稿: csv_id={duplicate_check['csv_id']}, 投稿日時={duplicate_check['posted_at']}")
+            print(f"  → スキップして、レコードを削除します")
+            delete_posted_record(post_id)
             continue
 
         if DRY_RUN:
@@ -641,7 +1112,13 @@ def check_and_post():
                 if not thread_post_id:
                     print(f"  ⚠️  スレッド投稿に失敗しましたが、メイン投稿は成功")
 
-            mark_as_posted(post_id, threads_post_id)
+            # 投稿済みとしてマーク（posted_history.csv への記録を含む）
+            mark_as_posted(post_id, threads_post_id, csv_id)
+
+            # 投稿後にレコードを削除（デフォルト動作）
+            if DELETE_AFTER_POST:
+                print(f"  → 投稿済みレコードを削除します（再投稿防止）")
+                delete_posted_record(post_id)
         else:
             mark_as_failed(post_id, "API投稿エラー")
 
@@ -947,6 +1424,9 @@ def main():
   # PDCA分析
   python threads_sqlite.py pdca                # 過去3日間
   python threads_sqlite.py pdca --days 7       # 過去7日間
+
+  # 学習ログ更新
+  python threads_sqlite.py update-learnings --text "今日の気づき"
         """
     )
 
@@ -954,7 +1434,7 @@ def main():
         'command',
         nargs='?',
         default='post',
-        choices=['post', 'list', 'add', 'import', 'export', 'pdca'],
+        choices=['post', 'list', 'add', 'import', 'export', 'pdca', 'daily-report', 'update-learnings'],
         help='実行するコマンド'
     )
 
@@ -1021,6 +1501,16 @@ def main():
 
     elif args.command == 'pdca':
         generate_pdca_report(args.days)
+
+    elif args.command == 'daily-report':
+        create_daily_report()
+
+    elif args.command == 'update-learnings':
+        if not args.text:
+            print("✗ エラー: --text オプションで学習内容を指定してください")
+            print("例: python threads_sqlite.py update-learnings --text '短文メタ発言が効果的'")
+            sys.exit(1)
+        update_learnings(args.text)
 
 
 if __name__ == '__main__':
