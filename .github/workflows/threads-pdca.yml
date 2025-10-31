@@ -7,9 +7,12 @@ on:
     # 実際の投稿は1日25件制限で制御
     - cron: '*/10 * * * *'
 
+    # 毎朝のレポート投稿（日本時間 9時）
+    - cron: '0 0 * * *'
+
     # 3日ごとにPDCAレポート生成（日本時間 20時）
     - cron: '0 11 */3 * *'
-  
+
   # 手動実行
   workflow_dispatch:
     inputs:
@@ -20,6 +23,7 @@ on:
         type: choice
         options:
           - post
+          - daily-report
           - pdca
           - full-cycle
 
@@ -212,3 +216,66 @@ jobs:
           echo "✅ PDCAレポートが生成されました"
           echo "📋 Issuesタブで確認してください"
           cat pdca_report.md || echo "レポートファイルが見つかりません"
+
+  # 毎朝のレポート投稿ジョブ（毎日9時 JST）
+  daily-report:
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'schedule' && github.event.schedule == '0 0 * * *') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'daily-report')
+
+    steps:
+      - name: リポジトリをチェックアウト (main ブランチ)
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: データベースを復元（automationブランチから）
+        run: |
+          # automationブランチからthreads.dbを取得
+          git fetch origin automation
+          git checkout origin/automation -- threads.db || echo "⚠️ データベースが見つかりません"
+
+          if [ -f threads.db ]; then
+            echo "✅ データベースを復元しました"
+          else
+            echo "📦 新規データベースを作成します"
+            python3 migrate_to_sqlite.py init
+            python3 threads_sqlite.py import --csv posts_schedule.csv
+          fi
+
+      - name: 毎朝のレポートを生成・投稿
+        run: python3 threads_sqlite.py daily-report
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+
+      - name: データベースをautomationブランチに保存
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          # automationブランチに切り替え
+          git fetch origin automation
+          git checkout automation
+
+          # データベースを追加
+          git add threads.db
+
+          if ! git diff --staged --quiet; then
+            git commit -m "Update: Daily report posted [auto]"
+            git push origin automation
+            echo "✅ データベースをautomationブランチに保存しました"
+          else
+            echo "📝 変更がないため、コミットをスキップします"
+          fi
