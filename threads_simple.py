@@ -73,9 +73,8 @@ def save_last_posted_at(dt):
 
 
 def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
-    """投稿すべき投稿を取得（過去はスキップ、上限あり）"""
+    """投稿すべき投稿を取得（時間範囲ベース、上限あり）"""
     posts = []
-    now = datetime.now(JST)
 
     with open(csv_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -93,13 +92,10 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
             scheduled_at = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
             scheduled_at = scheduled_at.replace(tzinfo=JST)
 
-            # 【重要】過去の投稿は絶対に投稿しない（スパム対策）
-            if scheduled_at <= now:
-                continue
-
-            # 時間範囲チェック
+            # 時間範囲チェック（これだけで十分）
             if after_time is None:
-                # 初回実行時: before_time 以前の未来の投稿
+                # 初回実行時: before_time 以前
+                # （初回は投稿しないので、ここには到達しない）
                 if scheduled_at <= before_time:
                     posts.append({
                         'csv_id': csv_id,
@@ -109,6 +105,7 @@ def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
                     })
             else:
                 # 通常実行: (after_time, before_time] の範囲
+                # scheduled_at <= before_time で自動的に過去を含む
                 if after_time < scheduled_at <= before_time:
                     posts.append({
                         'csv_id': csv_id,
