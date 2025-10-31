@@ -660,16 +660,30 @@ def list_posts(status=None, limit=20, today=False, tomorrow=False):
 
 
 def import_from_csv(csv_file):
-    """CSVファイルから投稿をインポート"""
+    """CSVファイルから投稿をインポート（posted_history.csv を考慮）"""
     if not os.path.exists(csv_file):
         print(f"✗ ファイルが見つかりません: {csv_file}")
         return
+
+    # posted_history.csv から投稿済み csv_id を読み込む
+    posted_ids = {}  # {csv_id: posted_at}
+    history_file = 'posted_history.csv'
+    if os.path.exists(history_file):
+        with open(history_file, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                csv_id = row.get('csv_id', '').strip()
+                posted_at = row.get('posted_at', '').strip()
+                if csv_id:
+                    posted_ids[csv_id] = posted_at
+        print(f"📝 posted_history.csv から {len(posted_ids)} 件の投稿済み記録を読み込みました")
 
     conn = get_db_connection()
     cursor = conn.cursor()
 
     imported = 0
-    skipped = 0
+    skipped_posted = 0  # 投稿済みのためスキップ
+    skipped_error = 0   # エラーのためスキップ
 
     with open(csv_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -683,7 +697,12 @@ def import_from_csv(csv_file):
             thread_text = row.get('thread_text', '').strip() or None
 
             if not csv_id or not datetime_str or not text:
-                skipped += 1
+                skipped_error += 1
+                continue
+
+            # posted_history.csv に存在する場合はスキップ
+            if csv_id in posted_ids:
+                skipped_posted += 1
                 continue
 
             try:
@@ -704,17 +723,19 @@ def import_from_csv(csv_file):
                 imported += 1
 
             except sqlite3.IntegrityError:
-                skipped += 1
+                skipped_error += 1
             except Exception as e:
                 print(f"✗ エラー (ID: {csv_id}): {e}")
-                skipped += 1
+                skipped_error += 1
 
     conn.commit()
     conn.close()
 
     print(f"✅ インポート完了:")
-    print(f"   成功: {imported}件")
-    print(f"   スキップ: {skipped}件")
+    print(f"   インポート: {imported}件")
+    print(f"   投稿済みスキップ: {skipped_posted}件")
+    if skipped_error > 0:
+        print(f"   エラースキップ: {skipped_error}件")
 
 
 def export_to_csv(output_file, status=None):

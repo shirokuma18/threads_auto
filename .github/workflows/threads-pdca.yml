@@ -61,85 +61,30 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-      - name: データベースを初期化（初回のみ）
-        run: |
-          if [ ! -f threads.db ]; then
-            echo "📦 データベースを初期化中..."
-            python3 migrate_to_sqlite.py init
-            python3 threads_sqlite.py import --csv posts_schedule.csv
-            echo "✅ データベース初期化完了"
-          else
-            echo "✅ 既存のデータベースを使用"
-
-            # 今日投稿すべきpending投稿数をチェック
-            CURRENT_DATE=$(TZ=Asia/Tokyo date '+%Y-%m-%d')
-            TODAY_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
-            TODAY_POSTED=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='posted' AND DATE(posted_at) = '$CURRENT_DATE'")
-            TOTAL_PENDING=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-
-            echo "📊 DB状態: pending $TOTAL_PENDING 件 (今日 $TODAY_PENDING 件) / posted (今日 $TODAY_POSTED 件)"
-
-            # 今日投稿すべきpending投稿がなく、かつ今日のposted投稿もない場合のみリカバリー
-            if [ "$TODAY_PENDING" -eq 0 ] && [ "$TODAY_POSTED" -eq 0 ]; then
-              echo "⚠️  今日の投稿がありません。CSVから再インポートします。"
-              rm -f threads.db
-              python3 migrate_to_sqlite.py init
-              python3 threads_sqlite.py import --csv posts_schedule.csv
-              TODAY_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending' AND DATE(scheduled_at) = '$CURRENT_DATE'")
-              TOTAL_PENDING_NEW=$(sqlite3 threads.db "SELECT COUNT(*) FROM posts WHERE status='pending'")
-              echo "📊 再インポート後: pending $TOTAL_PENDING_NEW 件 (今日 $TODAY_PENDING_NEW 件)"
-            elif [ "$TODAY_POSTED" -gt 0 ]; then
-              echo "✅ 今日すでに $TODAY_POSTED 件投稿済み。既存DBを使用します。"
-            fi
-          fi
-
-      - name: 投稿スクリプトを実行
-        run: python threads_sqlite.py post
+      - name: シンプル投稿スクリプトを実行
+        run: python3 threads_simple.py
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
 
-      - name: 投稿履歴を更新・投稿済みをCSVから削除
+      - name: 最終実行時刻をコミット
         if: always()
         run: |
-          if [ -f threads.db ]; then
-            # 1. 今日のposted投稿を posted_history.csv に追加
-            sqlite3 threads.db -header -csv \
-              "SELECT csv_id, posted_at FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
-              | tail -n +2 >> posted_history.csv
+          # .last_posted_at をコミット（実行状態の保存）
+          if [ -f .last_posted_at ]; then
+            git add .last_posted_at
 
-            # 重複を削除
-            sort -u posted_history.csv -o posted_history.csv.tmp
-            mv posted_history.csv.tmp posted_history.csv
-
-            # ヘッダーを先頭に追加
-            (echo "csv_id,posted_at" && tail -n +2 posted_history.csv | sort -u) > posted_history.csv.tmp
-            mv posted_history.csv.tmp posted_history.csv
-
-            # 2. 投稿済みの csv_id を取得
-            POSTED_IDS=$(sqlite3 threads.db -csv \
-              "SELECT csv_id FROM posts WHERE status='posted' AND DATE(posted_at) = date('now', '+9 hours')" \
-              | tr '\n' ',' | sed 's/,$//')
-
-            if [ -n "$POSTED_IDS" ]; then
-              echo "📝 投稿済みIDをCSVから削除: $POSTED_IDS"
-
-              # 3. posts_schedule.csv から投稿済みの行を削除
-              python3 cleanup_csv.py "$POSTED_IDS"
-            fi
-
-            # 4. データベース、CSV、履歴ファイルをコミット
-            if ! git diff --quiet posted_history.csv posts_schedule.csv threads.db 2>/dev/null || [ -n "$(git ls-files --others --exclude-standard threads.db)" ]; then
-              POSTED_COUNT=$(tail -n +2 posted_history.csv | wc -l | tr -d ' ')
-              REMAINING_COUNT=$(tail -n +2 posts_schedule.csv | wc -l | tr -d ' ')
-
-              git add posted_history.csv posts_schedule.csv threads.db
-              git commit -m "Update: Posted ${POSTED_COUNT} total, ${REMAINING_COUNT} remaining [auto]"
+            # 変更があればコミット
+            if ! git diff --quiet HEAD .last_posted_at 2>/dev/null; then
+              LAST_TIME=$(cat .last_posted_at)
+              git commit -m "Update: Last posted at $LAST_TIME [auto]"
               git push origin automation
-              echo "✅ データベースと履歴を automation ブランチに保存しました"
+              echo "✅ 最終実行時刻を automation ブランチに保存しました"
             else
               echo "📝 変更がないため、コミットをスキップします"
             fi
+          else
+            echo "⚠️  .last_posted_at ファイルが見つかりません"
           fi
 
   # PDCAレポート生成ジョブ（3日ごと or 手動）
