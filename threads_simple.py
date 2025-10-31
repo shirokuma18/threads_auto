@@ -44,6 +44,7 @@ JST = timezone(timedelta(hours=9))
 # 設定
 LAST_POSTED_FILE = '.last_posted_at'
 POST_INTERVAL_SECONDS = 60  # 投稿間隔（秒）
+MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数（スパム対策）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 
 # ドライランモード時は間隔を短縮
@@ -54,8 +55,8 @@ if DRY_RUN:
 def get_last_posted_at():
     """前回投稿時刻を取得（JST）"""
     if not os.path.exists(LAST_POSTED_FILE):
-        # 初回実行時は現在時刻の少し前を返す（直近の投稿を取得するため）
-        return datetime.now(JST) - timedelta(hours=24)
+        # 初回実行時は None を返す（安全策として処理）
+        return None
 
     with open(LAST_POSTED_FILE, 'r') as f:
         timestamp_str = f.read().strip()
@@ -71,9 +72,10 @@ def save_last_posted_at(dt):
     print(f"✓ 最終投稿時刻を保存: {dt.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
 
-def get_posts_to_publish(csv_file, after_time, before_time):
-    """投稿すべき投稿を取得"""
+def get_posts_to_publish(csv_file, after_time, before_time, max_posts=None):
+    """投稿すべき投稿を取得（過去はスキップ、上限あり）"""
     posts = []
+    now = datetime.now(JST)
 
     with open(csv_file, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -91,17 +93,38 @@ def get_posts_to_publish(csv_file, after_time, before_time):
             scheduled_at = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M')
             scheduled_at = scheduled_at.replace(tzinfo=JST)
 
-            # (after_time, before_time] の範囲内かチェック
-            if after_time < scheduled_at <= before_time:
-                posts.append({
-                    'csv_id': csv_id,
-                    'scheduled_at': scheduled_at,
-                    'text': text,
-                    'thread_text': thread_text
-                })
+            # 【重要】過去の投稿は絶対に投稿しない（スパム対策）
+            if scheduled_at <= now:
+                continue
+
+            # 時間範囲チェック
+            if after_time is None:
+                # 初回実行時: before_time 以前の未来の投稿
+                if scheduled_at <= before_time:
+                    posts.append({
+                        'csv_id': csv_id,
+                        'scheduled_at': scheduled_at,
+                        'text': text,
+                        'thread_text': thread_text
+                    })
+            else:
+                # 通常実行: (after_time, before_time] の範囲
+                if after_time < scheduled_at <= before_time:
+                    posts.append({
+                        'csv_id': csv_id,
+                        'scheduled_at': scheduled_at,
+                        'text': text,
+                        'thread_text': thread_text
+                    })
 
     # 予定時刻順にソート
     posts.sort(key=lambda x: x['scheduled_at'])
+
+    # 投稿数制限（スパム対策）
+    if max_posts and len(posts) > max_posts:
+        print(f"\n⚠️  投稿数制限: {len(posts)}件 → {max_posts}件に制限（スパム対策）")
+        posts = posts[:max_posts]
+
     return posts
 
 
@@ -186,17 +209,29 @@ def main():
 
     # 前回投稿時刻を取得
     last_posted_at = get_last_posted_at()
+
+    # 初回実行の安全策
+    if last_posted_at is None:
+        print(f"前回実行: なし（初回実行）")
+        print("\n⚠️  初回実行のため、過去の投稿をスキップします")
+        print("現在時刻を保存して終了します...")
+        if not DRY_RUN:
+            save_last_posted_at(now)
+        print("\n✅ 次回実行から通常の投稿が開始されます")
+        return
+
     print(f"前回実行: {last_posted_at.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
-    # 投稿すべき投稿を取得
-    posts_to_publish = get_posts_to_publish('posts_schedule.csv', last_posted_at, now)
+    # 投稿すべき投稿を取得（スパム対策: 最大4件）
+    posts_to_publish = get_posts_to_publish('posts_schedule.csv', last_posted_at, now, max_posts=MAX_POSTS_PER_RUN)
 
     print(f"\n📊 投稿対象: {len(posts_to_publish)} 件")
 
     if not posts_to_publish:
         print("\n✓ 投稿する投稿がありません")
         # 実行時刻だけ更新
-        save_last_posted_at(now)
+        if not DRY_RUN:
+            save_last_posted_at(now)
         return
 
     # 投稿リストを表示
