@@ -49,22 +49,39 @@ cat learnings.md
 - 恋愛: 元カレ、マッチングアプリなど具体的シーン
 - 生活: ミニマル暮らしなどポジティブなライフスタイル
 
-### 3. プロジェクト構造
+### 3. プロジェクト構造（2025-10-31 システム設計刷新）
+
+#### 🎯 シンプルアーキテクチャ
+
+**単一の信頼できる情報源:**
+- `posts_schedule.csv`: すべての投稿（永久保存、削除しない）
+- `.last_posted_at`: 最終実行時刻（自動更新）
+
+**仕組み:**
+```
+scheduled_at が (last_posted_at, now] の範囲 → 投稿
+```
+
+**メリット:**
+- ✅ 冪等性（何度実行しても同じ結果）
+- ✅ 同期問題ゼロ
+- ✅ シンプル（バグが入りにくい）
 
 #### 重要ファイル
-- `posts_schedule.csv`: 予約投稿マスターデータ（git追跡）
-- `threads.db`: 実行時DB（GitHub Actionsキャッシュ、.gitignore）
-- `posted_history.csv`: 投稿履歴（重複防止用、git追跡）
+- `posts_schedule.csv`: 予約投稿マスターデータ（すべての投稿、永久保存）
+- `.last_posted_at`: 最終実行時刻（automation ブランチで管理）
 - `learnings.md`: 仮説検証ログ（PDCA改善履歴）
 
 #### ブランチ戦略
 - `main`: 開発・新規投稿追加（手動）
-- `automation`: 投稿履歴の自動更新（GitHub Actions）
+- `automation`: 実行状態の自動更新（GitHub Actions）
 - 毎日0時に automation → main を自動マージ
 
 #### 実行スクリプト
-- `threads_sqlite.py`: メイン投稿スクリプト
-  - `post`: 投稿実行
+- `threads_simple.py`: **メイン投稿スクリプト（新）**
+  - 時間範囲ベースの投稿（シンプル）
+  - `--dry-run`: テスト実行
+- `threads_sqlite.py`: レポート生成用（旧）
   - `daily-report`: 毎朝の成果報告生成
   - `update-learnings`: 学習ログ更新
 
@@ -119,9 +136,16 @@ learnings.md の成功パターンに基づいて、以下を確認:
 
 ## 📝 更新履歴
 
-### 2025-10-31
+### 2025-10-31（重大アーキテクチャ刷新）
+- **システム設計の大幅簡略化**
+- posted_history.csv 完全廃止
+- threads.db 完全廃止
+- 新スクリプト threads_simple.py 実装
+- 単一の信頼できる情報源: posts_schedule.csv + .last_posted_at
+- タイムゾーンバグ修正（UTC → JST統一）
 - learnings.md システムを構築
 - 初回の仮説検証結果を記録（35投稿の分析）
 - 本質的気づき: 「中に人がいる感じ」「リアルな成長過程」が成功の鍵
 - 低パフォーマンス12トピックを削除（63→51投稿）
 - AI的教科書コンテンツからの脱却
+- スパム判定対策（数字・箇条書き制限）
