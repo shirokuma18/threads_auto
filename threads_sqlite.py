@@ -463,7 +463,9 @@ def mark_as_posted(post_id, threads_post_id, csv_id=None):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    posted_at = datetime.now()
+    # JST (UTC+9) で現在時刻を取得
+    jst = timezone(timedelta(hours=9))
+    posted_at = datetime.now(jst).replace(tzinfo=None)  # タイムゾーン情報を削除してJST時刻として保存
 
     cursor.execute("""
         UPDATE posts
@@ -504,6 +506,10 @@ def save_analytics(post_id, analytics_data):
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    # JST (UTC+9) で現在時刻を取得
+    jst = timezone(timedelta(hours=9))
+    fetched_at = datetime.now(jst).replace(tzinfo=None)
+
     cursor.execute("""
         INSERT INTO analytics (
             post_id, threads_post_id,
@@ -522,7 +528,7 @@ def save_analytics(post_id, analytics_data):
         analytics_data['engagement'],
         analytics_data['engagement_rate'],
         analytics_data['permalink'],
-        datetime.now()
+        fetched_at
     ))
 
     conn.commit()
@@ -534,7 +540,10 @@ def get_recent_posts(days=3):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+    # JST (UTC+9) で現在時刻を取得
+    jst = timezone(timedelta(hours=9))
+    now_jst = datetime.now(jst).replace(tzinfo=None)
+    cutoff_date = (now_jst - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
 
     cursor.execute("""
         SELECT id, csv_id, text, posted_at, threads_post_id, category, scheduled_at
@@ -1221,8 +1230,9 @@ def generate_pdca_markdown(analytics_results, days):
     char_counts = [len(a['text']) for a in analytics_results]
     avg_char_count = sum(char_counts) / len(char_counts) if char_counts else 0
 
-    # Markdownレポート生成
-    now = datetime.now().strftime('%Y年%m月%d日 %H:%M')
+    # Markdownレポート生成（JST時刻で表示）
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(jst).strftime('%Y年%m月%d日 %H:%M')
 
     report = f"""# 📊 Threads PDCA レポート
 
