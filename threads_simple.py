@@ -42,9 +42,9 @@ USER_ID = os.getenv('THREADS_USER_ID')
 JST = timezone(timedelta(hours=9))
 
 # 設定
-SCHEDULE_HOURS = [8, 12, 15, 18, 21, 23]  # スケジュール時刻（JST）
+SCHEDULE_HOURS = [8, 12, 15, 18, 20, 21, 23]  # スケジュール時刻（JST）
 POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒）
-MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数（24件/日 = 6回 × 4件）
+MAX_POSTS_PER_RUN = 4  # 1回の実行での最大投稿数
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 
 # ドライランモード時は間隔を短縮
@@ -64,7 +64,10 @@ def get_current_schedule_hour(now_hour):
     # 21時のターム: 21:00-22:59
     elif now_hour >= 21:
         return 21
-    # 18時のターム: 18:00-20:59
+    # 20時のターム: 20:00-20:59
+    elif now_hour >= 20:
+        return 20
+    # 18時のターム: 18:00-19:59
     elif now_hour >= 18:
         return 18
     # 15時のターム: 15:00-17:59
