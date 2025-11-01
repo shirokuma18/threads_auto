@@ -2,11 +2,16 @@
 """
 Threads シンプル投稿スケジューラ + Daily Report
 
-仕組み（新アーキテクチャ）:
-1. 現在時刻から該当するスケジュールターム（8, 12, 15, 18, 21, 23時）を判定
+仕組み（新アーキテクチャ - スパム対策版）:
+1. 現在時刻から該当するスケジュールターム（8:00~23:30、30分間隔、計32枠）を判定
 2. Threads APIから最近の投稿を取得
 3. そのタームの投稿で未投稿のものだけを取得
-4. 投稿実行（リポジトリへの影響なし）
+4. 投稿実行（リポジトリへの影響なし、1回につき最大1投稿）
+
+スケジュール:
+- 投稿頻度: 30分に1回
+- 時間帯: 8:00~23:30（JST）
+- 投稿数: 最大32投稿/日（1回につき1投稿のみ）
 
 コマンド:
 - python3 threads_simple.py          投稿実行
@@ -14,6 +19,7 @@ Threads シンプル投稿スケジューラ + Daily Report
 - python3 threads_simple.py daily-report  毎朝の成果報告を投稿
 
 メリット:
+- スパム判定を回避（30分間隔、1回1投稿）
 - リポジトリへの影響ゼロ（ファイル書き込みなし）
 - ブランチ分け不要（mainのみ）
 - 冪等性がある（何度実行しても同じ結果）
@@ -42,9 +48,15 @@ USER_ID = os.getenv('THREADS_USER_ID')
 JST = timezone(timedelta(hours=9))
 
 # 設定
-SCHEDULE_HOURS = [8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24]  # スケジュール時刻（JST）
+# 30分間隔で8:00~24:00（32枠 × 1投稿 = 32投稿/日）
+SCHEDULE_TIMES = [
+    (8, 0), (8, 30), (9, 0), (9, 30), (10, 0), (10, 30), (11, 0), (11, 30),
+    (12, 0), (12, 30), (13, 0), (13, 30), (14, 0), (14, 30), (15, 0), (15, 30),
+    (16, 0), (16, 30), (17, 0), (17, 30), (18, 0), (18, 30), (19, 0), (19, 30),
+    (20, 0), (20, 30), (21, 0), (21, 30), (22, 0), (22, 30), (23, 0), (23, 30)
+]  # スケジュール時刻（JST）: 時、分のタプル
 POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒、6分）
-MAX_POSTS_PER_RUN = 5  # 1回の実行での最大投稿数（12枠 × 5投稿 = 60投稿/日）
+MAX_POSTS_PER_RUN = 1  # 1回の実行での最大投稿数（スパム対策: 30分に1投稿のみ）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 
 # ドライランモード時は間隔を短縮
@@ -52,45 +64,29 @@ if DRY_RUN:
     POST_INTERVAL_SECONDS = 0.1
 
 
-def get_current_schedule_hour(now_hour):
+def get_current_schedule_time(now_hour, now_minute):
     """現在時刻から該当するスケジュール時刻（ターム）を取得
 
-    GitHub Actionsのcronは最大15分程度ずれるため、ターム管理で対応
-    新スケジュール: 8, 10, 12, 15, 17, 19, 20, 21, 22, 23, 24(0)時
+    GitHub Actionsのcronは最大15分程度ずれるため、±10分の範囲で該当するタームを判定
+    新スケジュール: 30分間隔で8:00~23:30（32枠）
     """
-    # 24時(0時)のターム: 0:00-7:59 (深夜～早朝)
-    if now_hour >= 0 and now_hour < 8:
-        return 24  # 24時として扱う（CSVでは24:00と記録）
-    # 23時のターム: 23:00-23:59
-    elif now_hour >= 23:
-        return 23
-    # 22時のターム: 22:00-22:59
-    elif now_hour >= 22:
-        return 22
-    # 21時のターム: 21:00-21:59
-    elif now_hour >= 21:
-        return 21
-    # 20時のターム: 20:00-20:59
-    elif now_hour >= 20:
-        return 20
-    # 19時のターム: 19:00-19:59
-    elif now_hour >= 19:
-        return 19
-    # 17時のターム: 17:00-18:59
-    elif now_hour >= 17:
-        return 17
-    # 15時のターム: 15:00-16:59
-    elif now_hour >= 15:
-        return 15
-    # 12時のターム: 12:00-14:59
-    elif now_hour >= 12:
-        return 12
-    # 10時のターム: 10:00-11:59
-    elif now_hour >= 10:
-        return 10
-    # 8時のターム: 8:00-9:59
-    else:
-        return 8
+    # 8:00より前は該当なし
+    if now_hour < 8:
+        return None
+
+    # 現在時刻を分に変換
+    current_minutes = now_hour * 60 + now_minute
+
+    # 各スケジュール時刻と比較（±10分の範囲で一致するか確認）
+    for schedule_hour, schedule_minute in SCHEDULE_TIMES:
+        schedule_minutes = schedule_hour * 60 + schedule_minute
+
+        # ±10分の範囲内ならそのタームとする
+        if abs(current_minutes - schedule_minutes) <= 10:
+            return (schedule_hour, schedule_minute)
+
+    # 該当するタームがない
+    return None
 
 
 def get_recent_posts_from_api():
@@ -123,8 +119,21 @@ def is_post_already_published(post_text, recent_posts):
     return False
 
 
-def get_posts_to_publish(csv_file, target_date, schedule_hour, max_posts=None):
-    """指定日時のスケジュール時刻の未投稿分を取得"""
+def get_posts_to_publish(csv_file, target_date, schedule_time, max_posts=None):
+    """指定日時のスケジュール時刻の未投稿分を取得
+
+    Args:
+        csv_file: CSVファイルパス
+        target_date: 対象日付
+        schedule_time: (時, 分) のタプル、またはNone
+        max_posts: 最大投稿数
+    """
+    # schedule_timeがNoneの場合は空リスト返却
+    if schedule_time is None:
+        return []
+
+    schedule_hour, schedule_minute = schedule_time
+
     # APIから最近の投稿を取得（ここで1回だけ）
     recent_posts = get_recent_posts_from_api()
 
@@ -155,8 +164,10 @@ def get_posts_to_publish(csv_file, target_date, schedule_hour, max_posts=None):
             if subcategory:
                 topics.append(subcategory)
 
-            # 今日の日付 & そのスケジュール時刻の投稿のみ
-            if scheduled_at.date() == target_date and scheduled_at.hour == schedule_hour:
+            # 今日の日付 & そのスケジュール時刻（時+分）の投稿のみ
+            if (scheduled_at.date() == target_date and
+                scheduled_at.hour == schedule_hour and
+                scheduled_at.minute == schedule_minute):
                 # 既に投稿済みかチェック
                 if not is_post_already_published(text, recent_posts):
                     posts.append({
@@ -265,11 +276,18 @@ def main():
     print(f"\n現在時刻: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
     # 該当するスケジュール時刻を取得
-    schedule_hour = get_current_schedule_hour(now.hour)
-    print(f"該当スケジュール: {schedule_hour}:00 のターム")
+    schedule_time = get_current_schedule_time(now.hour, now.minute)
 
-    # 投稿すべき投稿を取得（スパム対策: 最大4件）
-    posts_to_publish = get_posts_to_publish('posts_schedule.csv', now.date(), schedule_hour, max_posts=MAX_POSTS_PER_RUN)
+    if schedule_time is None:
+        print("該当スケジュール: なし（スケジュール時間外）")
+        print("\n✓ スケジュール時間外です（8:00~23:30の30分間隔）")
+        return
+
+    schedule_hour, schedule_minute = schedule_time
+    print(f"該当スケジュール: {schedule_hour}:{schedule_minute:02d} のターム")
+
+    # 投稿すべき投稿を取得（スパム対策: 最大1件）
+    posts_to_publish = get_posts_to_publish('posts_schedule.csv', now.date(), schedule_time, max_posts=MAX_POSTS_PER_RUN)
 
     print(f"\n📊 投稿対象: {len(posts_to_publish)} 件")
 
