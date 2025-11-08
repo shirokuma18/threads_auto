@@ -280,10 +280,91 @@ def create_threads_post(text, reply_to_id=None, topics=None):
         return None
 
 
+def get_previous_schedule_time(schedule_time):
+    """1つ前のスケジュール時刻を取得"""
+    if schedule_time is None:
+        return None
+
+    current_hour, current_minute = schedule_time
+    current_index = None
+
+    # 現在のタームのインデックスを探す
+    for i, (h, m) in enumerate(SCHEDULE_TIMES):
+        if h == current_hour and m == current_minute:
+            current_index = i
+            break
+
+    # 前のタームを返す（存在する場合）
+    if current_index is not None and current_index > 0:
+        return SCHEDULE_TIMES[current_index - 1]
+
+    return None
+
+
+def check_and_post_previous_term(csv_path, now, current_schedule_time):
+    """前タームがスキップされていたら投稿（5分待機あり）
+
+    Returns:
+        bool: 前タームの投稿を実行したかどうか
+    """
+    previous_time = get_previous_schedule_time(current_schedule_time)
+
+    if previous_time is None:
+        return False
+
+    prev_hour, prev_minute = previous_time
+    print(f"\n🔍 前タームチェック: {prev_hour}:{prev_minute:02d}")
+
+    # 前タームの投稿を取得
+    previous_posts = get_posts_to_publish(csv_path, now.date(), previous_time, max_posts=1)
+
+    if previous_posts:
+        print(f"⚠️  前タームの投稿が未投稿です: {previous_posts[0]['csv_id']}")
+        print(f"   → 前タームの投稿を先に実行します")
+
+        # 前タームの投稿を実行
+        post = previous_posts[0]
+        print(f"\n[前ターム補完] ID: {post['csv_id']}")
+        print(f"予定時刻: {post['scheduled_at'].strftime('%Y-%m-%d %H:%M')}")
+        print(f"本文: {post['text'][:100]}...")
+        if post.get('topics'):
+            print(f"トピック: {', '.join(post['topics'])}")
+
+        # 投稿実行
+        threads_post_id = create_threads_post(post['text'], topics=post.get('topics'))
+
+        if threads_post_id:
+            # スレッド投稿がある場合
+            if post['thread_text']:
+                print(f"  → スレッド投稿を作成中...")
+                time.sleep(2)
+                thread_post_id = create_threads_post(post['thread_text'], reply_to_id=threads_post_id)
+                if not thread_post_id:
+                    print(f"  ⚠️  スレッド投稿に失敗しましたが、メイン投稿は成功")
+
+            print(f"✅ 前タームの投稿完了")
+
+            # 5分待機してから現在タームへ（ドライラン時は短縮）
+            wait_seconds = 1 if DRY_RUN else 300
+            if DRY_RUN:
+                print(f"\n⏳ [ドライラン] 現在タームの投稿まで待機（短縮）...")
+            else:
+                print(f"\n⏳ 現在タームの投稿まで {wait_seconds} 秒（5分）待機...")
+            time.sleep(wait_seconds)
+
+            return True
+        else:
+            print(f"❌ 前タームの投稿に失敗")
+            return False
+    else:
+        print(f"✓ 前タームは既に投稿済み")
+        return False
+
+
 def main():
     """メイン処理"""
     print("=" * 70)
-    print("📅 Threads シンプル投稿スケジューラ")
+    print("📅 Threads シンプル投稿スケジューラ（スキップ補完機能付き）")
     if DRY_RUN:
         print("   [ドライランモード - 実際には投稿されません]")
     print("=" * 70)
@@ -306,6 +387,11 @@ def main():
     # 投稿すべき投稿を取得（スパム対策: 最大1件）
     csv_path = resolve_csv_path()
     print(f"CSV: {csv_path}")
+
+    # 【新機能】前タームがスキップされていたらカバー
+    posted_previous = check_and_post_previous_term(csv_path, now, schedule_time)
+
+    # 現在タームの投稿を取得
     posts_to_publish = get_posts_to_publish(csv_path, now.date(), schedule_time, max_posts=MAX_POSTS_PER_RUN)
 
     print(f"\n📊 投稿対象: {len(posts_to_publish)} 件")
