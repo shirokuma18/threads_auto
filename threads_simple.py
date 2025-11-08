@@ -64,18 +64,12 @@ DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
 def resolve_csv_path() -> str:
     """CSVファイルのパスを解決
 
-    優先順位:
-    1) 環境変数 CSV_FILE が設定されていればそれを使用
-    2) data/posts_schedule.csv が存在すればそれを使用
-    3) カレントの posts_schedule.csv を使用
+    常に data/posts_schedule.csv を使用
     """
-    env_path = os.getenv('CSV_FILE')
-    if env_path and Path(env_path).exists():
-        return env_path
-    data_default = Path('data/posts_schedule.csv')
-    if data_default.exists():
-        return str(data_default)
-    return 'posts_schedule.csv'
+    csv_path = Path('data/posts_schedule.csv')
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_path}")
+    return str(csv_path)
 
 # ドライランモード時は間隔を短縮
 if DRY_RUN:
@@ -85,7 +79,8 @@ if DRY_RUN:
 def get_current_schedule_time(now_hour, now_minute):
     """現在時刻から該当するスケジュール時刻（ターム）を取得
 
-    GitHub Actionsのcronは最大15分程度ずれるため、±10分の範囲で該当するタームを判定
+    GitHub Actionsのcronは最大15分程度ずれるため、±15分の範囲で該当するタームを判定
+    複数マッチする場合は最も近いタームを選択
     新スケジュール: 30分間隔で8:00~23:30（32枠）
     """
     # 8:00より前は該当なし
@@ -95,16 +90,20 @@ def get_current_schedule_time(now_hour, now_minute):
     # 現在時刻を分に変換
     current_minutes = now_hour * 60 + now_minute
 
-    # 各スケジュール時刻と比較（±10分の範囲で一致するか確認）
+    # 最も近いスケジュール時刻を探す
+    closest_schedule = None
+    min_diff = float('inf')
+
     for schedule_hour, schedule_minute in SCHEDULE_TIMES:
         schedule_minutes = schedule_hour * 60 + schedule_minute
+        diff = abs(current_minutes - schedule_minutes)
 
-        # ±10分の範囲内ならそのタームとする
-        if abs(current_minutes - schedule_minutes) <= 10:
-            return (schedule_hour, schedule_minute)
+        # ±15分の範囲内で最も近いものを記録
+        if diff <= 15 and diff < min_diff:
+            min_diff = diff
+            closest_schedule = (schedule_hour, schedule_minute)
 
-    # 該当するタームがない
-    return None
+    return closest_schedule
 
 
 def get_recent_posts_from_api():
