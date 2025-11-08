@@ -112,7 +112,7 @@ def main():
         writer = csv.writer(f)
         writer.writerow([
             'id','datetime','theme','len','op','end','br','concept','tense','thread',
-            'views','likes','replies','reposts','quotes','like_rate','reply_rate'
+            'views','likes','replies','reposts','quotes','like_rate','reply_rate','ppd','hour','tod'
         ])
 
         for r in rows:
@@ -131,13 +131,24 @@ def main():
             tags = parse_tags(r.get('hashtags') or '')
             dkey = r.get('datetime','').split(' ')[0]
             ppd = day_counts.get(dkey, 0)
+            # time-of-day bucket
+            dt_full = datetime.strptime(r.get('datetime'), '%Y-%m-%d %H:%M')
+            hh = dt_full.hour
+            if 20 <= hh <= 23:
+                tod = 'night'
+            elif 17 <= hh <= 19:
+                tod = 'evening'
+            elif 12 <= hh <= 16:
+                tod = 'afternoon'
+            else:
+                tod = 'morning'
             writer.writerow([
                 r.get('id'), r.get('datetime'), r.get('subcategory'),
                 tags.get('len',''), tags.get('op',''), tags.get('end',''), tags.get('br',''),
                 tags.get('concept',''), tags.get('tense',''), tags.get('thread','no'),
                 views, likes, replies, int(insights.get('reposts') or 0), int(insights.get('quotes') or 0),
                 f"{like_rate:.4f}", f"{reply_rate:.4f}",
-                ppd
+                ppd, hh, tod
             ])
 
     print(f"✅ Wrote {outpath}")
