@@ -29,8 +29,16 @@ def generate_note_article(story_id, posts, output_dir='note_articles'):
     category = first_post.get('category', '教室短編')
     subcategory = first_post.get('subcategory', '')
 
-    # 本文を結合
-    full_text = '\n\n---\n\n'.join(post['text'] for post in posts)
+    # 本文を結合（改行処理を調整）
+    # 各投稿内の空行（\n\n）を単一改行（\n）に変換
+    # 投稿間は --- で区切る（前後に空行）
+    processed_posts = []
+    for post in posts:
+        # 投稿内の連続する改行を単一改行に変換
+        text = post['text'].replace('\n\n', '\n')
+        processed_posts.append(text)
+
+    full_text = '\n\n---\n\n'.join(processed_posts)
 
     # タイトルを強烈にする（コンセプトが伝わる形に）
     # タイトル案のマッピング
@@ -92,16 +100,13 @@ def generate_note_article(story_id, posts, output_dir='note_articles'):
 
 ---
 
-**カテゴリ**: {category}
-**投稿数**: {len(posts)}投稿
-**初回投稿**: {posts[0]['datetime']}
+この物語が気に入ったら、スキやフォローをしてくれる継続の励みになるのでととても嬉しいです。ぜひお願いします。感想もたくさんお待ちしております。
 
----
-
-この物語が気に入ったら、サポートやフォローをお願いします。
 毎日、教室を舞台にした短編小説をThreadsで連載しています。
 
-Threadsアカウント: [@あなたのアカウント名]
+Threadsアカウント:@kyoshitsu_yohaku
+
+もし良いなと思っていただけたら、応援のお気持ちとしてご購入いただけますと幸いです。
 """
 
     # ファイルに保存
