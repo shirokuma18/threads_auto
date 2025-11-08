@@ -16,8 +16,16 @@ import random
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from pathlib import Path
+import os
 
-CSV_PATH = Path('posts_schedule.csv')
+def default_csv_path() -> Path:
+    env = os.getenv('CSV_FILE')
+    if env:
+        return Path(env)
+    p = Path('data/posts_schedule.csv')
+    return p if p.exists() else Path('posts_schedule.csv')
+
+CSV_PATH = default_csv_path()
 
 JST = timedelta(hours=9)  # used only for labels
 
@@ -199,4 +207,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

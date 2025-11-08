@@ -35,6 +35,7 @@ import sys
 import random
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+from pathlib import Path
 
 # 環境変数読み込み
 load_dotenv(override=True)
@@ -58,6 +59,23 @@ SCHEDULE_TIMES = [
 POST_INTERVAL_SECONDS = 360  # 投稿間隔（秒、6分）
 MAX_POSTS_PER_RUN = 1  # 1回の実行での最大投稿数（スパム対策: 30分に1投稿のみ）
 DRY_RUN = '--dry-run' in sys.argv  # ドライランモード
+
+
+def resolve_csv_path() -> str:
+    """CSVファイルのパスを解決
+
+    優先順位:
+    1) 環境変数 CSV_FILE が設定されていればそれを使用
+    2) data/posts_schedule.csv が存在すればそれを使用
+    3) カレントの posts_schedule.csv を使用
+    """
+    env_path = os.getenv('CSV_FILE')
+    if env_path and Path(env_path).exists():
+        return env_path
+    data_default = Path('data/posts_schedule.csv')
+    if data_default.exists():
+        return str(data_default)
+    return 'posts_schedule.csv'
 
 # ドライランモード時は間隔を短縮
 if DRY_RUN:
@@ -287,7 +305,9 @@ def main():
     print(f"該当スケジュール: {schedule_hour}:{schedule_minute:02d} のターム")
 
     # 投稿すべき投稿を取得（スパム対策: 最大1件）
-    posts_to_publish = get_posts_to_publish('posts_schedule.csv', now.date(), schedule_time, max_posts=MAX_POSTS_PER_RUN)
+    csv_path = resolve_csv_path()
+    print(f"CSV: {csv_path}")
+    posts_to_publish = get_posts_to_publish(csv_path, now.date(), schedule_time, max_posts=MAX_POSTS_PER_RUN)
 
     print(f"\n📊 投稿対象: {len(posts_to_publish)} 件")
 

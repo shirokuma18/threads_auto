@@ -84,7 +84,8 @@ def main():
 
     # Load schedule rows in range
     rows = []
-    with open('posts_schedule.csv', 'r', encoding='utf-8') as f:
+    csv_path = os.getenv('CSV_FILE') or ('data/posts_schedule.csv' if os.path.exists('data/posts_schedule.csv') else 'posts_schedule.csv')
+    with open(csv_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for r in reader:
             if not r.get('datetime'):

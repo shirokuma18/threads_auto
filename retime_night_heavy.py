@@ -13,8 +13,16 @@ import csv
 import sys
 from datetime import datetime, date
 from pathlib import Path
+import os
 
-CSV_PATH = Path('posts_schedule.csv')
+def default_csv_path() -> Path:
+    env = os.getenv('CSV_FILE')
+    if env:
+        return Path(env)
+    p = Path('data/posts_schedule.csv')
+    return p if p.exists() else Path('posts_schedule.csv')
+
+CSV_PATH = default_csv_path()
 
 # night-heavy 25-slot ordering (ascending time)
 SLOTS25 = [
@@ -73,4 +81,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

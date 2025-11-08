@@ -9,13 +9,20 @@
 """
 
 import csv
+import os
 from datetime import datetime, timedelta
 from collections import defaultdict
 
 # 設定
 MAX_POSTS_PER_DAY = 32
-INPUT_FILE = 'posts_schedule.csv'
-OUTPUT_FILE = 'posts_schedule.csv'
+def _csv_path():
+    env = os.getenv('CSV_FILE')
+    if env:
+        return env
+    return 'data/posts_schedule.csv' if os.path.exists('data/posts_schedule.csv') else 'posts_schedule.csv'
+
+INPUT_FILE = _csv_path()
+OUTPUT_FILE = INPUT_FILE
 
 # 30分間隔のスケジュール時刻（JST）
 SCHEDULE_TIMES = [
