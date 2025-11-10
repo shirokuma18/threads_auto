@@ -543,8 +543,12 @@ def generate_daily_report():
     for post in posts:
         timestamp_str = post.get('timestamp', '')
         if timestamp_str:
-            # ISO 8601形式をパース
-            post_time = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+            # ISO 8601形式をパース（+0000形式も対応）
+            if timestamp_str.endswith('+0000'):
+                timestamp_str = timestamp_str.replace('+0000', '+00:00')
+            elif timestamp_str.endswith('Z'):
+                timestamp_str = timestamp_str.replace('Z', '+00:00')
+            post_time = datetime.fromisoformat(timestamp_str)
             post_time_jst = post_time.astimezone(JST)
 
             if yesterday_start <= post_time_jst <= yesterday_end:

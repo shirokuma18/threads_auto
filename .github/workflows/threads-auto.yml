@@ -4,6 +4,8 @@ on:
   # 投稿スケジュール（定期実行）
   # 30分間隔で8:00~23:30 JST（32枠 × 1投稿 = 32投稿/日）
   schedule:
+    # 7時（Daily Report専用）
+    - cron: '0 22 * * *'   # 7:00 JST (Daily Report)
     # 8時台
     - cron: '0 23 * * *'   # 8:00 JST
     - cron: '30 23 * * *'  # 8:30 JST
@@ -57,8 +59,37 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 毎朝のDaily Report投稿（7:00 JST = 22:00 UTC前日）
+  daily-report:
+    runs-on: ubuntu-latest
+    # 7:00 JSTのcronでのみ実行
+    if: github.event.schedule == '0 22 * * *'
+
+    steps:
+      - name: リポジトリをチェックアウト (main ブランチ)
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: Daily Reportを生成・投稿
+        run: python3 threads_simple.py daily-report
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
+
   post:
     runs-on: ubuntu-latest
+    # 7:00 JST (Daily Report)以外のスケジュールで実行
+    if: github.event.schedule != '0 22 * * *'
 
     steps:
       - name: リポジトリをチェックアウト (main ブランチ)
@@ -78,33 +109,6 @@ jobs:
 
       - name: シンプル投稿スクリプトを実行
         run: python3 threads_simple.py
-        env:
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-
-  # 毎朝のレポート投稿（毎日9時 JST）
-  # 注: 9:00 JSTは通常投稿と重複するため、daily-reportは別途手動実行推奨
-  daily-report:
-    runs-on: ubuntu-latest
-    if: false  # 無効化（手動実行のみ）
-
-    steps:
-      - name: リポジトリをチェックアウト (main ブランチ)
-        uses: actions/checkout@v3
-        with:
-          ref: main
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Python環境をセットアップ
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: 依存関係をインストール
-        run: pip install requests python-dotenv
-
-      - name: Daily Reportを生成・投稿
-        run: python3 threads_simple.py daily-report
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
