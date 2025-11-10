@@ -2,8 +2,9 @@ name: Threads Auto Posting
 
 on:
   # 投稿スケジュール（定期実行）
+  # !! 停止中: シャドウバン対策のため自動投稿を一時停止 !!
   # 30分間隔で8:00~23:30 JST（32枠 × 1投稿 = 32投稿/日）
-  schedule:
+  schedule_disabled:
     # 7時（Daily Report専用）
     - cron: '0 22 * * *'   # 7:00 JST (Daily Report)
     # 8時台
