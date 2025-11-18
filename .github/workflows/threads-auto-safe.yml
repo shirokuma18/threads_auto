@@ -1,0 +1,45 @@
+name: Threads Safe Posting (New Account)
+
+on:
+  # 安全な投稿スケジュール（1日10投稿、2時間間隔）
+  # ランダムネス: Python側で±10分のランダム要素を追加
+  schedule:
+    # 平日・土日共通（土日は投稿数を制限）
+    - cron: '0 23 * * *'   # 08:00 JST
+    - cron: '0 1 * * *'    # 10:00 JST
+    - cron: '0 3 * * *'    # 12:00 JST
+    - cron: '0 5 * * *'    # 14:00 JST
+    - cron: '0 7 * * *'    # 16:00 JST
+    - cron: '0 9 * * *'    # 18:00 JST
+    - cron: '0 10 * * *'   # 19:00 JST
+    - cron: '0 11 * * *'   # 20:00 JST
+    - cron: '0 12 * * *'   # 21:00 JST
+    - cron: '0 13 * * *'   # 22:00 JST
+
+  # 手動実行
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: 安全投稿スクリプトを実行
+        run: python3 threads_safe.py
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN_NEW }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID_NEW }}
