@@ -1,0 +1,36 @@
+name: Threads 3 Posts Daily (Simple)
+
+on:
+  # 1日3回のスケジュール
+  schedule:
+    - cron: '0 23 * * *'   # 8:00 JST (朝の投稿)
+    - cron: '0 3 * * *'    # 12:00 JST (昼の投稿)
+    - cron: '0 10 * * *'   # 19:00 JST (夜の投稿)
+
+  # 手動実行
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python環境をセットアップ
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 依存関係をインストール
+        run: pip install requests python-dotenv
+
+      - name: 1日3投稿を実行
+        run: python3 threads_3posts.py
+        env:
+          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
+          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
